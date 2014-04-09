@@ -120,4 +120,8 @@ void do_restore_msg (long long id);
 
 int get_dh_config_on_answer (struct query *q);
 void fetch_dc_option (void);
+
+#ifdef _WIN32
+#define do_send_message(id, msg, len) do_send_message(id, msg, (int)(len))
+#endif
 #endif

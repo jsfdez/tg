@@ -46,6 +46,8 @@
 
 #include "mtproto-common.h"
 
+#include "wincompat.h"
+
 #define ALLOW_MULT 1
 char *default_prompt = "> ";
 
@@ -97,7 +99,7 @@ char *next_token (int *l) {
     }*/
     line_ptr++;
   }
-  *l = line_ptr - s;
+  *l = (int)(line_ptr - s);
   return s;
 }
 
@@ -245,6 +247,10 @@ char *get_default_prompt (void) {
 }
 
 char *complete_none (const char *text UU, int state UU) {
+#ifdef _WIN32
+	_CRT_UNUSED (text);
+	_CRT_UNUSED (state);
+#endif
   return 0;
 }
 
@@ -493,7 +499,7 @@ char *command_generator (const char *text, int state) {
  
   char c = 0;
   if (!state) {
-    len = strlen (text);
+    len = (int)strlen (text);
     index = -1;
     
     c = rl_line_buffer[rl_point];
@@ -545,6 +551,10 @@ char *command_generator (const char *text, int state) {
 }
 
 char **complete_text (char *text, int start UU, int end UU) {
+#ifdef _WIN32
+	_CRT_UNUSED (start);
+	_CRT_UNUSED (end);
+#endif
   return (char **) rl_completion_matches (text, command_generator);
 }
 
@@ -709,7 +719,7 @@ void interpreter (char *line UU) {
     do_send_text (id, tstrndup (s, t));
   } else if (IS_WORD ("fwd")) {
     GET_PEER;
-    int num = next_token_int ();
+    int num = (int)next_token_int ();
     if (num == NOT_FOUND || num <= 0) {
       printf ("Bad msg id\n");
       RET;
@@ -809,7 +819,7 @@ void interpreter (char *line UU) {
     do_get_user_info (id);
   } else if (IS_WORD ("history")) {
     GET_PEER;
-    int limit = next_token_int ();
+    int limit = (int)next_token_int ();
     do_get_history (id, limit > 0 ? limit : 40);
   } else if (IS_WORD ("chat_add_user")) {
     GET_PEER_CHAT;    
@@ -853,7 +863,7 @@ void interpreter (char *line UU) {
     }
     int phone_len, first_name_len, last_name_len;
     char *phone, *first_name, *last_name;
-    phone_len = strlen (U->user.phone);
+    phone_len = (int)strlen (U->user.phone);
     phone = U->user.phone;
     first_name = next_token (&first_name_len);
     if (!first_name_len) {
@@ -1078,13 +1088,13 @@ void interpreter (char *line UU) {
       RET;
     }
     if (IS_WORD ("debug_verbosity")) {
-      verbosity = num;
+      verbosity = (int)num;
     } else if (IS_WORD ("log_level")) {
-      log_level = num;
+      log_level = (int)num;
     } else if (IS_WORD ("msg_num")) {
-      msg_num_mode = num;
+      msg_num_mode = (int)num;
     } else if (IS_WORD ("alert")) {
-      alert_sound = num;
+      alert_sound = (int)num;
     }
   } else if (IS_WORD ("chat_with_peer")) {
     GET_PEER;

@@ -29,21 +29,29 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <fcntl.h>
 #if defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <sys/endian.h>
 #endif
 #include <sys/types.h>
+#ifdef _WIN32
+#include "wincompat.h"
+#else
 #include <netdb.h>
+#endif
 #include <openssl/rand.h>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/sha.h>
+#ifndef _WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#endif
 
 #include "telegram.h"
 #include "net.h"
@@ -68,6 +76,11 @@
 
 #define MAX_NET_RES        (1L << 16)
 extern int log_level;
+
+#ifdef _WIN32
+#define print_date(X) print_date((long)X)
+#define bl_do_chat_add_user(C, VERSION, USER, INVITER, DATE) bl_do_chat_add_user(C, VERSION, USER, INVITER, (int)DATE)
+#endif
 
 int verbosity;
 int auth_success;
@@ -186,17 +199,17 @@ int encrypt_buffer[ENCRYPT_BUFFER_INTS];
 int decrypt_buffer[ENCRYPT_BUFFER_INTS];
 
 int encrypt_packet_buffer (void) {
-  return pad_rsa_encrypt ((char *) packet_buffer, (packet_ptr - packet_buffer) * 4, (char *) encrypt_buffer, ENCRYPT_BUFFER_INTS * 4, pubKey->n, pubKey->e);
+  return pad_rsa_encrypt ((char *) packet_buffer, (int)(packet_ptr - packet_buffer) * 4, (char *) encrypt_buffer, ENCRYPT_BUFFER_INTS * 4, pubKey->n, pubKey->e);
 }
 
 int encrypt_packet_buffer_aes_unauth (const char server_nonce[16], const char hidden_client_nonce[32]) {
   init_aes_unauth (server_nonce, hidden_client_nonce, AES_ENCRYPT);
-  return pad_aes_encrypt ((char *) packet_buffer, (packet_ptr - packet_buffer) * 4, (char *) encrypt_buffer, ENCRYPT_BUFFER_INTS * 4);
+  return pad_aes_encrypt ((char *) packet_buffer, (int)(packet_ptr - packet_buffer) * 4, (char *) encrypt_buffer, ENCRYPT_BUFFER_INTS * 4);
 }
 
 
 int rpc_send_packet (struct connection *c) {
-  int len = (packet_ptr - packet_buffer) * 4;
+  int len = (int)(packet_ptr - packet_buffer) * 4;
   c->out_packet_num ++;
   long long next_msg_id = (long long) ((1LL << 32) * get_utime (CLOCK_REALTIME)) & -4;
   if (next_msg_id <= unenc_msg_header.out_msg_id) {
@@ -328,8 +341,8 @@ int process_respq_answer (struct connection *c, char *packet, int len) {
   }
 
   assert (g > 1 && g < what);
-  p1 = g;
-  p2 = what / g;
+  p1 = (unsigned int)g;
+  p2 = (unsigned int)(what / g);
   if (p1 > p2) {
     unsigned t = p1; p1 = p2; p2 = t;
   }
@@ -452,7 +465,7 @@ int check_DH_params (BIGNUM *p, int g) {
   ensure (BN_set_word (&dh_g, 4 * g));
 
   ensure (BN_mod (&t, p, &dh_g, BN_ctx));
-  int x = BN_get_word (&t);
+  int x = (int)BN_get_word (&t);
   assert (x >= 0 && x < 4 * g);
 
   BN_free (&dh_g);
@@ -576,7 +589,7 @@ int process_dh_answer (struct connection *c, char *packet, int len) {
   assert (!memcmp (decrypt_buffer, sha1_buffer, 20));
   assert ((char *) in_end - (char *) in_ptr < 16);
 
-  GET_DC(c)->server_time_delta = server_time - time (0);
+	GET_DC(c)->server_time_delta = server_time - (int)time(0);
   GET_DC(c)->server_time_udelta = server_time - get_utime (CLOCK_MONOTONIC);
   //logprintf ( "server time is %d, delta = %d\n", server_time, server_time_delta);
 
@@ -772,6 +785,9 @@ long long encrypt_send_message (struct connection *c, int *msg, int msg_ints, in
 int longpoll_count, good_messages;
 
 int auth_work_start (struct connection *c UU) {
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+#endif
   return 1;
 }
 
@@ -903,6 +919,10 @@ void work_update_binlog (void) {
 }
 
 void work_update (struct connection *c UU, long long msg_id UU) {
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
   unsigned op = fetch_int ();
   switch (op) {
   case CODE_update_new_message:
@@ -918,7 +938,7 @@ void work_update (struct connection *c UU, long long msg_id UU) {
   case CODE_update_message_i_d:
     {
       int id = fetch_int (); // id
-      int new = fetch_long (); // random_id
+      int new = (int)fetch_long (); // random_id
       struct message *M = message_get (new);
       if (M) {
         bl_do_set_msg_id (M, id);
@@ -1429,6 +1449,10 @@ void work_updates (struct connection *c, long long msg_id) {
 }
 
 void work_update_short_message (struct connection *c UU, long long msg_id UU) {
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
   assert (fetch_int () == (int)CODE_update_short_message);
   struct message *M = fetch_alloc_message_short ();  
   unread_messages ++;
@@ -1440,7 +1464,11 @@ void work_update_short_message (struct connection *c UU, long long msg_id UU) {
 }
 
 void work_update_short_chat_message (struct connection *c UU, long long msg_id UU) {
-  assert (fetch_int () == CODE_update_short_chat_message);
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
+	assert(fetch_int() == CODE_update_short_chat_message);
   struct message *M = fetch_alloc_message_short_chat ();  
   unread_messages ++;
   print_message (M);
@@ -1451,7 +1479,11 @@ void work_update_short_chat_message (struct connection *c UU, long long msg_id U
 }
 
 void work_container (struct connection *c, long long msg_id UU) {
-  if (verbosity) {
+#ifdef _WIN32
+	_CRT_UNUSED(msg_id);
+#endif
+	if(verbosity)
+	{
     logprintf ( "work_container: msg_id = %lld\n", msg_id);
   }
   assert (fetch_int () == CODE_msg_container);
@@ -1474,7 +1506,11 @@ void work_container (struct connection *c, long long msg_id UU) {
 }
 
 void work_new_session_created (struct connection *c, long long msg_id UU) {
-  if (verbosity) {
+#ifdef _WIN32
+	_CRT_UNUSED(msg_id);
+#endif
+	if(verbosity)
+	{
     logprintf ( "work_new_session_created: msg_id = %lld\n", msg_id);
   }
   assert (fetch_int () == (int)CODE_new_session_created);
@@ -1486,7 +1522,12 @@ void work_new_session_created (struct connection *c, long long msg_id UU) {
 }
 
 void work_msgs_ack (struct connection *c UU, long long msg_id UU) {
-  if (verbosity) {
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
+	if(verbosity)
+	{
     logprintf ( "work_msgs_ack: msg_id = %lld\n", msg_id);
   }
   assert (fetch_int () == CODE_msgs_ack);
@@ -1503,7 +1544,12 @@ void work_msgs_ack (struct connection *c UU, long long msg_id UU) {
 }
 
 void work_rpc_result (struct connection *c UU, long long msg_id UU) {
-  if (verbosity) {
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
+	if(verbosity)
+	{
     logprintf ( "work_rpc_result: msg_id = %lld\n", msg_id);
   }
   assert (fetch_int () == (int)CODE_rpc_result);
@@ -1544,7 +1590,11 @@ void work_packed (struct connection *c, long long msg_id) {
 }
 
 void work_bad_server_salt (struct connection *c UU, long long msg_id UU) {
-  assert (fetch_int () == (int)CODE_bad_server_salt);
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
+	assert(fetch_int() == (int)CODE_bad_server_salt);
   long long id = fetch_long ();
   query_restart (id);
   fetch_int (); // seq_no
@@ -1554,13 +1604,21 @@ void work_bad_server_salt (struct connection *c UU, long long msg_id UU) {
 }
 
 void work_pong (struct connection *c UU, long long msg_id UU) {
-  assert (fetch_int () == CODE_pong);
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
+	assert(fetch_int() == CODE_pong);
   fetch_long (); // msg_id
   fetch_long (); // ping_id
 }
 
 void work_detailed_info (struct connection *c UU, long long msg_id UU) {
-  assert (fetch_int () == CODE_msg_detailed_info);
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
+	assert(fetch_int() == CODE_msg_detailed_info);
   fetch_long (); // msg_id
   fetch_long (); // answer_msg_id
   fetch_int (); // bytes
@@ -1568,20 +1626,32 @@ void work_detailed_info (struct connection *c UU, long long msg_id UU) {
 }
 
 void work_new_detailed_info (struct connection *c UU, long long msg_id UU) {
-  assert (fetch_int () == (int)CODE_msg_new_detailed_info);
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
+	assert(fetch_int() == (int)CODE_msg_new_detailed_info);
   fetch_long (); // answer_msg_id
   fetch_int (); // bytes
   fetch_int (); // status
 }
 
 void work_updates_to_long (struct connection *c UU, long long msg_id UU) {
-  assert (fetch_int () == (int)CODE_updates_too_long);
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
+	assert(fetch_int() == (int)CODE_updates_too_long);
   logprintf ("updates to long... Getting difference\n");
   do_get_difference ();
 }
 
 void work_bad_msg_notification (struct connection *c UU, long long msg_id UU) {
-  assert (fetch_int () == (int)CODE_bad_msg_notification);
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+	_CRT_UNUSED(msg_id);
+#endif
+	assert(fetch_int() == (int)CODE_bad_msg_notification);
   long long m1 = fetch_long ();
   int s = fetch_int ();
   int e = fetch_int ();
@@ -1589,7 +1659,11 @@ void work_bad_msg_notification (struct connection *c UU, long long msg_id UU) {
 }
 
 void rpc_execute_answer (struct connection *c, long long msg_id UU) {
-  if (verbosity >= 5) {
+#ifdef _WIN32
+	_CRT_UNUSED(msg_id);
+#endif
+	if(verbosity >= 5)
+	{
     logprintf ("rpc_execute_answer: fd=%d\n", c->fd);
     hexdump_in ();
   }
@@ -1647,6 +1721,9 @@ void rpc_execute_answer (struct connection *c, long long msg_id UU) {
 }
 
 int process_rpc_message (struct connection *c UU, struct encrypted_message *enc, int len) {
+#ifdef _WIN32
+	_CRT_UNUSED(c);
+#endif
   const int MINSZ = offsetof (struct encrypted_message, message);
   const int UNENCSZ = offsetof (struct encrypted_message, server_salt);
   if (verbosity) {
@@ -1672,8 +1749,8 @@ int process_rpc_message (struct connection *c UU, struct encrypted_message *enc,
   
   int this_server_time = enc->msg_id >> 32LL;
   if (!DC->server_time_delta) {
-    DC->server_time_delta = this_server_time - get_utime (CLOCK_REALTIME);
-    DC->server_time_udelta = this_server_time - get_utime (CLOCK_MONOTONIC);
+    DC->server_time_delta = this_server_time - (int)get_utime (CLOCK_REALTIME);
+		DC->server_time_udelta = this_server_time - (int)get_utime(CLOCK_MONOTONIC);
   }
   double st = get_server_time (DC);
   if (this_server_time < st - 300 || this_server_time > st + 30) {
@@ -1737,7 +1814,7 @@ int rpc_execute (struct connection *c, int op, int len) {
   }
 
 #if !defined(__MACH__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined (__CYGWIN__)
-  setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, (int[]){0}, 4);
+  setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, '\0', 4);
 #endif
   int o = c_state;
   if (GET_DC(c)->flags & 1) { o = st_authorized;}
@@ -1745,19 +1822,19 @@ int rpc_execute (struct connection *c, int op, int len) {
   case st_reqpq_sent:
     process_respq_answer (c, Response/* + 8*/, Response_len/* - 12*/);
 #if !defined(__MACH__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined (__CYGWIN__)
-    setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, (int[]){0}, 4);
+    setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, '\0', 4);
 #endif
     return 0;
   case st_reqdh_sent:
     process_dh_answer (c, Response/* + 8*/, Response_len/* - 12*/);
 #if !defined(__MACH__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined (__CYGWIN__)
-    setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, (int[]){0}, 4);
+		setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, '\0', 4);
 #endif
     return 0;
   case st_client_dh_sent:
     process_auth_complete (c, Response/* + 8*/, Response_len/* - 12*/);
 #if !defined(__MACH__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined (__CYGWIN__)
-    setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, (int[]){0}, 4);
+		setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, '\0', 4);
 #endif
     return 0;
   case st_authorized:
@@ -1767,7 +1844,7 @@ int rpc_execute (struct connection *c, int op, int len) {
       process_rpc_message (c, (void *)(Response/* + 8*/), Response_len/* - 12*/);
     }
 #if !defined(__MACH__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined (__CYGWIN__)
-    setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, (int[]){0}, 4);
+		setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, '\0', 4);
 #endif
     return 0;
   default:
@@ -1795,7 +1872,7 @@ int tc_becomes_ready (struct connection *c) {
   flush_out (c);
   
 #if !defined(__MACH__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined (__CYGWIN__)
-  setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, (int[]){0}, 4);
+	setsockopt (c->fd, IPPROTO_TCP, TCP_QUICKACK, '\0', 4);
 #endif
   int o = c_state;
   if (GET_DC(c)->flags & 1) { o = st_authorized; }

@@ -30,4 +30,8 @@ int check_g (unsigned char p[256], BIGNUM *g);
 int check_g_bn (BIGNUM *p, BIGNUM *g);
 int check_DH_params (BIGNUM *p, int g);
 void secure_random (void *s, int l);
+
+#ifdef _WIN32
+#define encrypt_send_message(c, msg, msg_ints, useful) (c, msg, (int)(msg_ints), useful);
+#endif
 #endif

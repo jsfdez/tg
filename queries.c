@@ -25,14 +25,22 @@
 #include <string.h>
 #include <memory.h>
 #include <stdlib.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#ifndef _WIN32
 #include <sys/utsname.h>
+#endif
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
+#endif
+
+#ifdef _WIN32
+#include "wincompat.h"
 #endif
 
 #include "include.h"
@@ -113,7 +121,7 @@ int alarm_query (struct query *q) {
   out_int (4 * q->data_len);
   out_ints (q->data, q->data_len);
   
-  encrypt_send_message (q->session->c, packet_buffer, packet_ptr - packet_buffer, 0);
+  encrypt_send_message (q->session->c, packet_buffer, (int)(packet_ptr - packet_buffer), 0);
   return 0;
 }
 
@@ -162,6 +170,11 @@ struct query *send_query (struct dc *DC, int ints, void *data, struct query_meth
   queries_num ++;
   return q;
 }
+
+#ifdef _WIN32
+#define send_query(DC, INTS, DATA, METHODS, EXTRA) send_query(DC, (int)(INTS), DATA, METHODS, EXTRA)
+#endif
+
 
 void query_ack (long long id) {
   struct query *q = query_get (id);
@@ -312,6 +325,7 @@ void do_insert_header (void) {
   out_int (CODE_invoke_with_layer12);  
   out_int (CODE_init_connection);
   out_int (TG_APP_ID);
+#ifndef _WIN32
   if (allow_send_linux_version) {
     struct utsname st;
     uname (&st);
@@ -322,11 +336,18 @@ void do_insert_header (void) {
     out_string (TG_VERSION " (build " TG_BUILD ")");
     out_string ("En");
   } else { 
+#endif
     out_string ("x86");
+#ifdef _WIN32
+		out_string ("Windows");
+#else
     out_string ("Linux");
+#endif
     out_string (TG_VERSION);
     out_string ("en");
+#ifndef _WIN32
   }
+#endif
 }
 
 /* {{{ Get config */
@@ -347,6 +368,9 @@ void fetch_dc_option (void) {
 }
 
 int help_get_config_on_answer (struct query *q UU) {
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
   unsigned op = fetch_int ();
   assert (op == CODE_config || op == CODE_config_old);
   fetch_int ();
@@ -389,6 +413,9 @@ void do_help_get_config (void) {
 /* {{{ Send code */
 char *phone_code_hash;
 int send_code_on_answer (struct query *q UU) {
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
   assert (fetch_int () == (int)CODE_auth_sent_code);
   fetch_bool ();
   int l = prefetch_strlen ();
@@ -404,8 +431,11 @@ int send_code_on_answer (struct query *q UU) {
 }
 
 int send_code_on_error (struct query *q UU, int error_code, int l, char *error) {
-  int s = strlen ("PHONE_MIGRATE_");
-  int s2 = strlen ("NETWORK_MIGRATE_");
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	int s = (int)strlen ("PHONE_MIGRATE_");
+  int s2 = (int)strlen ("NETWORK_MIGRATE_");
   if (l >= s && !memcmp (error, "PHONE_MIGRATE_", s)) {
     int i = error[s] - '0';
     want_dc_num = i;
@@ -478,12 +508,18 @@ void do_send_code (const char *user) {
 
 
 int phone_call_on_answer (struct query *q UU) {
-  fetch_bool ();
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	fetch_bool ();
   return 0;
 }
 
 int phone_call_on_error (struct query *q UU, int error_code, int l, char *error) {
-  logprintf ( "error_code = %d, error = %.*s\n", error_code, l, error);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	logprintf ("error_code = %d, error = %.*s\n", error_code, l, error);
   assert (0);
   return 0;
 }
@@ -515,15 +551,21 @@ int cr_f (void) {
 }
 
 int check_phone_on_answer (struct query *q UU) {
-  assert (fetch_int () == (int)CODE_auth_checked_phone);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == (int)CODE_auth_checked_phone);
   check_phone_result = fetch_bool ();
   fetch_bool ();
   return 0;
 }
 
 int check_phone_on_error (struct query *q UU, int error_code, int l, char *error) {
-  int s = strlen ("PHONE_MIGRATE_");
-  int s2 = strlen ("NETWORK_MIGRATE_");
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	int s = (int)strlen ("PHONE_MIGRATE_");
+  int s2 = (int)strlen ("NETWORK_MIGRATE_");
   if (l >= s && !memcmp (error, "PHONE_MIGRATE_", s)) {
     int i = error[s] - '0';
     assert (DC_list[i]);
@@ -579,7 +621,10 @@ int nr_f (void) {
 }
 
 int nearest_dc_on_answer (struct query *q UU) {
-  assert (fetch_int () == (int)CODE_nearest_dc);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == (int)CODE_nearest_dc);
   char *country = fetch_str_dup ();
   if (verbosity > 0) {
     logprintf ("Server thinks that you are in %s\n", country);
@@ -591,7 +636,11 @@ int nearest_dc_on_answer (struct query *q UU) {
 }
 
 int fail_on_error (struct query *q UU, int error_code UU, int l UU, char *error UU) {
-  fprintf (stderr, "error #%d: %.*s\n", error_code, l, error);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+	_CRT_UNUSED (l);
+#endif
+	fprintf (stderr, "error #%d: %.*s\n", error_code, l, error);
   assert (0);
   return 0;
 }
@@ -621,7 +670,10 @@ int sign_in_is_ok (void) {
 struct user User;
 
 int sign_in_on_answer (struct query *q UU) {
-  assert (fetch_int () == (int)CODE_auth_authorization);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == (int)CODE_auth_authorization);
   int expires = fetch_int ();
   fetch_user (&User);
   if (!our_id) {
@@ -641,7 +693,10 @@ int sign_in_on_answer (struct query *q UU) {
 }
 
 int sign_in_on_error (struct query *q UU, int error_code, int l, char *error) {
-  logprintf ( "error_code = %d, error = %.*s\n", error_code, l, error);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	logprintf ("error_code = %d, error = %.*s\n", error_code, l, error);
   sign_in_ok = -1;
   assert (0);
   return 0;
@@ -683,7 +738,10 @@ int do_send_code_result_auth (const char *code, const char *first_name, const ch
 extern char *user_list[];
 
 int get_contacts_on_answer (struct query *q UU) {
-  int i;
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	int i;
   assert (fetch_int () == (int)CODE_contacts_contacts);
   assert (fetch_int () == CODE_vector);
   int n = fetch_int ();
@@ -802,14 +860,14 @@ void encr_start (void) {
 
 
 void encr_finish (struct secret_chat *E) {
-  int l = packet_ptr - (encr_extra +  8);
+  int l = (int)(packet_ptr - (encr_extra +  8));
   while (((packet_ptr - encr_extra) - 3) & 3) {  
     int t;
     secure_random (&t, 4);
     out_int (t);
   }
 
-  *encr_extra = ((packet_ptr - encr_extra) - 1) * 4 * 256 + 0xfe;
+  *encr_extra = (int)((packet_ptr - encr_extra) - 1) * 4 * 256 + 0xfe;
   encr_extra ++;
   *(long long *)encr_extra = E->key_fingerprint;
   encr_extra += 2;
@@ -939,6 +997,10 @@ void do_send_msg (struct message *M) {
   send_query (DC_working, packet_ptr - packet_buffer, packet_buffer, &msg_send_methods, M);
 }
 
+#ifdef _WIN32
+#undef do_send_message
+#endif
+
 void do_send_message (peer_id_t id, const char *msg, int len) {
   if (get_peer_type (id) == PEER_ENCR_CHAT) {
     peer_t *P = user_chat_get (id);
@@ -954,7 +1016,7 @@ void do_send_message (peer_id_t id, const char *msg, int len) {
   long long t;
   secure_random (&t, 8);
   logprintf ("t = %lld, len = %d\n", t, len);
-  bl_do_send_message_text (t, our_id, get_peer_type (id), get_peer_id (id), time (0), len, msg);
+  bl_do_send_message_text (t, our_id, get_peer_type (id), get_peer_id (id), (int)time (0), len, msg);
   struct message *M = message_get (t);
   assert (M);
   do_send_msg (M);
@@ -988,6 +1050,9 @@ void do_send_text (peer_id_t id, char *file_name) {
 
 /* {{{ Mark read */
 int mark_read_on_receive (struct query *q UU) {
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
   assert (fetch_int () == (int)CODE_messages_affected_history);
   fetch_pts ();
   fetch_seq ();
@@ -996,7 +1061,10 @@ int mark_read_on_receive (struct query *q UU) {
 }
 
 int mark_read_encr_on_receive (struct query *q UU) {
-  fetch_bool ();
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	fetch_bool ();
   return 0;
 }
 
@@ -1038,14 +1106,14 @@ void do_mark_read (peer_id_t id) {
       rprintf ("Unknown last peer message\n");
       return;
     }
-    do_messages_mark_read (id, P->last->id);
+    do_messages_mark_read (id, (int)P->last->id);
     return;
   }
   assert (get_peer_type (id) == PEER_ENCR_CHAT);
   if (P->last) {
     do_messages_mark_read_encr (id, P->encr_chat.access_hash, P->last->date);
   } else {
-    do_messages_mark_read_encr (id, P->encr_chat.access_hash, time (0) - 10);
+    do_messages_mark_read_encr (id, P->encr_chat.access_hash, (int)time (0) - 10);
     
   }
 }
@@ -1086,7 +1154,7 @@ int get_history_on_answer (struct query *q UU) {
     fetch_alloc_user ();
   }
   if (sn > 0 && q->extra) {
-    do_messages_mark_read (*(peer_id_t *)&(q->extra), ML[0]->id);
+    do_messages_mark_read (*(peer_id_t *)&(q->extra), (int)ML[0]->id);
   }
   return 0;
 }
@@ -1130,6 +1198,9 @@ void do_get_history (peer_id_t id, int limit) {
 /* {{{ Get dialogs */
 int dialog_list_got;
 int get_dialogs_on_answer (struct query *q UU) {
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
   unsigned x = fetch_int (); 
   assert (x == CODE_messages_dialogs || x == CODE_messages_dialogs_slice);
   if (x == CODE_messages_dialogs_slice) {
@@ -1260,7 +1331,10 @@ int send_file_part_on_answer (struct query *q) {
 }
 
 int send_file_on_answer (struct query *q UU) {
-  assert (fetch_int () == (int)CODE_messages_stated_message);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == (int)CODE_messages_stated_message);
   struct message *M = fetch_alloc_message ();
   assert (fetch_int () == CODE_vector);
   int n, i;
@@ -1478,7 +1552,7 @@ void send_part (struct send_file *f) {
       M->media.encr_photo.key = f->key;
       M->media.encr_photo.iv = f->init_iv;
       M->media.encr_photo.key_fingerprint = (*(int *)md5) ^ (*(int *)(md5 + 4)); 
-      M->media.encr_photo.size = f->size;
+      M->media.encr_photo.size = (int)f->size;
   
       M->flags = FLAG_ENCRYPTED;
       M->from_id = MK_USER (our_id);
@@ -1487,7 +1561,7 @@ void send_part (struct send_file *f) {
       M->message = tstrdup ("");
       M->out = 1;
       M->id = r;
-      M->date = time (0);
+      M->date = (int)time (0);
       
       send_query (DC_working, packet_ptr - packet_buffer, packet_buffer, &send_encr_file_methods, M);
 
@@ -1528,7 +1602,7 @@ void do_send_photo (int type, peer_id_t to_id, char *file_name) {
   f->size = size;
   f->offset = 0;
   f->part_num = 0;
-  int tmp = ((size + 2999) / 3000);
+  int tmp = (int)((size + 2999) / 3000);
   f->part_size = (1 << 10);
   while (f->part_size < tmp) {
     f->part_size *= 2;
@@ -1569,6 +1643,9 @@ void do_send_photo (int type, peer_id_t to_id, char *file_name) {
 
 /* {{{ Forward */
 int fwd_msg_on_answer (struct query *q UU) {
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
   assert (fetch_int () == (int)CODE_messages_stated_message);
   struct message *M = fetch_alloc_message ();
   assert (fetch_int () == CODE_vector);
@@ -1608,7 +1685,10 @@ void do_forward_message (peer_id_t id, int n) {
 
 /* {{{ Rename chat */
 int rename_chat_on_answer (struct query *q UU) {
-  assert (fetch_int () == (int)CODE_messages_stated_message);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == (int)CODE_messages_stated_message);
   struct message *M = fetch_alloc_message ();
   assert (fetch_int () == CODE_vector);
   int n, i;
@@ -1667,7 +1747,10 @@ void print_chat_info (struct chat *C) {
 }
 
 int chat_info_on_answer (struct query *q UU) {
-  struct chat *C = fetch_alloc_chat_full ();
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	struct chat *C = fetch_alloc_chat_full ();
   print_chat_info (C);
   return 0;
 }
@@ -1717,7 +1800,10 @@ void print_user_info (struct user *U) {
 }
 
 int user_info_on_answer (struct query *q UU) {
-  struct user *U = fetch_alloc_user_full ();
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	struct user *U = fetch_alloc_user_full ();
   print_user_info (U);
   return 0;
 }
@@ -1754,7 +1840,10 @@ void do_get_user_info (peer_id_t id) {
 
 /* {{{ Get user info silently */
 int user_list_info_silent_on_answer (struct query *q UU) {
-  assert (fetch_int () == CODE_vector);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == CODE_vector);
   int n = fetch_int ();
   int i;
   for (i = 0; i < n; i++) {
@@ -2050,7 +2139,10 @@ int isn_export_auth_str (void) {
 }
 
 int export_auth_on_answer (struct query *q UU) {
-  assert (fetch_int () == (int)CODE_auth_exported_authorization);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == (int)CODE_auth_exported_authorization);
   int l = fetch_int ();
   if (!our_id) {
     our_id = l;
@@ -2082,7 +2174,10 @@ void do_export_auth (int num) {
 
 /* {{{ Import auth */
 int import_auth_on_answer (struct query *q UU) {
-  assert (fetch_int () == (int)CODE_auth_authorization);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == (int)CODE_auth_authorization);
   fetch_int (); // expires
   fetch_alloc_user ();
   tfree_str (export_auth_str);
@@ -2107,7 +2202,10 @@ void do_import_auth (int num) {
 
 /* {{{ Add contact */
 int add_contact_on_answer (struct query *q UU) {
-  assert (fetch_int () == (int)CODE_contacts_imported_contacts);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == (int)CODE_contacts_imported_contacts);
   assert (fetch_int () == CODE_vector);
   int n = fetch_int ();
   if (n > 0) {
@@ -2209,7 +2307,10 @@ void do_msg_search (peer_id_t id, int from, int to, int limit, const char *s) {
 
 /* {{{ Contacts search */
 int contacts_search_on_answer (struct query *q UU) {
-  assert (fetch_int () == CODE_contacts_found);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == CODE_contacts_found);
   assert (fetch_int () == CODE_vector);
   int n = fetch_int ();
   int i;
@@ -2249,7 +2350,10 @@ void do_contacts_search (int limit, const char *s) {
 
 /* {{{ Encr accept */
 int send_encr_accept_on_answer (struct query *q UU) {
-  struct secret_chat *E = fetch_alloc_encrypted_chat ();
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	struct secret_chat *E = fetch_alloc_encrypted_chat ();
 
   if (E->state == sc_ok) {
     print_start ();
@@ -2272,7 +2376,10 @@ int send_encr_accept_on_answer (struct query *q UU) {
 }
 
 int send_encr_request_on_answer (struct query *q UU) {
-  struct secret_chat *E = fetch_alloc_encrypted_chat ();
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	struct secret_chat *E = fetch_alloc_encrypted_chat ();
   if (E->state == sc_deleted) {
     print_start ();
     push_color (COLOR_YELLOW);
@@ -2552,7 +2659,10 @@ int unread_messages;
 int difference_got;
 int seq, pts, qts, last_date;
 int get_state_on_answer (struct query *q UU) {
-  assert (fetch_int () == (int)CODE_updates_state);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == (int)CODE_updates_state);
   bl_do_set_pts (fetch_int ());
   bl_do_set_qts (fetch_int ());
   bl_do_set_date (fetch_int ());
@@ -2565,7 +2675,10 @@ int get_state_on_answer (struct query *q UU) {
 
 int get_difference_active;
 int get_difference_on_answer (struct query *q UU) {
-  get_difference_active = 0;
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	get_difference_active = 0;
   unsigned x = fetch_int ();
   if (x == CODE_updates_difference_empty) {
     bl_do_set_date (fetch_int ());
@@ -2692,7 +2805,10 @@ void do_visualize_key (peer_id_t id) {
 
 /* {{{ Get suggested */
 int get_suggested_on_answer (struct query *q UU) {
-  assert (fetch_int () == CODE_contacts_suggested);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == CODE_contacts_suggested);
   assert (fetch_int () == CODE_vector);
   int n = fetch_int ();
   logprintf ("n = %d\n", n);
@@ -2824,7 +2940,10 @@ void do_create_group_chat (peer_id_t id, char *chat_topic) {
 /* {{{ Delete msg */
 
 int delete_msg_on_answer (struct query *q UU) {
-  assert (fetch_int () == CODE_vector);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == CODE_vector);
   int n = fetch_int ();
   fetch_skip (n);
   logprintf ("Deleted %d messages\n", n);
@@ -2848,7 +2967,10 @@ void do_delete_msg (long long id) {
 /* {{{ Restore msg */
 
 int restore_msg_on_answer (struct query *q UU) {
-  assert (fetch_int () == CODE_vector);
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	assert (fetch_int () == CODE_vector);
   int n = fetch_int ();
   fetch_skip (n);
   logprintf ("Restored %d messages\n", n);
@@ -2869,7 +2991,10 @@ void do_restore_msg (long long id) {
 }
 /* }}} */
 int update_status_on_answer (struct query *q UU) {
-  fetch_bool ();
+#ifdef _WIN32
+	_CRT_UNUSED (q);
+#endif
+	fetch_bool ();
   return 0;
 }
 

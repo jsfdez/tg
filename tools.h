@@ -41,4 +41,7 @@ int tasprintf (char **res, const char *format, ...) __attribute__ ((format (prin
 void tcheck (void);
 void texists (void *ptr, int size);
 #endif
+#ifdef _WIN32
+#define tfree(ptr, size) tfree(ptr, (int)(size))
+#endif
 #endif

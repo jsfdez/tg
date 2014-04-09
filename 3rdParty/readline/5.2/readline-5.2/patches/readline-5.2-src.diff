@@ -1,0 +1,4121 @@
+diff -ipuwr readline-5.2-orig/Makefile.in readline-5.2-src/Makefile.in
+--- readline-5.2-orig/Makefile.in	2005-05-08 04:11:24.000000000 +0200
++++ readline-5.2-src/Makefile.in	2006-11-12 11:35:53.343750000 +0100
+@@ -20,6 +20,9 @@ RL_LIBRARY_NAME = readline
+ 
+ PACKAGE = @PACKAGE_NAME@
+ VERSION = @PACKAGE_VERSION@
++MAJOR=$(shell echo $(RL_LIBRARY_VERSION) | sed -e "s/\..*$$//")\
++MINOR=$(shell echo $(RL_LIBRARY_VERSION) | sed -e "s/^[^\.]*\.0*\([0-9]\+\).*$$/\1/") \
++VERSADD = -Wl,--major-image-version=$(MAJOR) -Wl,--minor-image-version=$(MINOR) 
+ 
+ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
+ PACKAGE_NAME = @PACKAGE_NAME@
+@@ -27,7 +30,8 @@ PACKAGE_STRING = @PACKAGE_STRING@
+ PACKAGE_VERSION = @PACKAGE_VERSION@
+ 
+ srcdir = @srcdir@
+-VPATH = .:@srcdir@
++resdir = ./res
++VPATH = @srcdir@ $(resdir)
+ top_srcdir = @top_srcdir@
+ BUILD_DIR = @BUILD_DIR@
+ 
+@@ -40,7 +44,7 @@ RANLIB = @RANLIB@
+ AR = @AR@
+ ARFLAGS = @ARFLAGS@
+ RM = rm -f
+-CP = cp
++CP = cp	-fp
+ MV = mv
+ 
+ PURIFY = @PURIFY@
+@@ -69,7 +73,7 @@ DESTDIR =
+ ETAGS = etags -tw
+ CTAGS = ctags -tw
+ 
+-CFLAGS = @CFLAGS@
++CFLAGS = @CFLAGS@ -DREADLINE_STATIC
+ LOCAL_CFLAGS = @LOCAL_CFLAGS@ -DRL_LIBRARY_VERSION='"$(RL_LIBRARY_VERSION)"'
+ CPPFLAGS = @CPPFLAGS@
+ 
+@@ -98,6 +102,8 @@ GCC_LINT_CFLAGS = $(XCCFLAGS) $(GCC_LINT
+ LIBRARY_NAME = libreadline.a
+ STATIC_LIBS = libreadline.a libhistory.a
+ 
++WCWIDTH_OBJ = wcwidth.o
++
+ # The C code source files for this library.
+ CSOURCES = $(srcdir)/readline.c $(srcdir)/funmap.c $(srcdir)/keymaps.c \
+ 	   $(srcdir)/vi_mode.c $(srcdir)/parens.c $(srcdir)/rltty.c \
+@@ -110,7 +116,7 @@ CSOURCES = $(srcdir)/readline.c $(srcdir
+ 	   $(srcdir)/histfile.c $(srcdir)/nls.c $(srcdir)/search.c \
+ 	   $(srcdir)/shell.c $(srcdir)/savestring.c $(srcdir)/tilde.c \
+ 	   $(srcdir)/text.c $(srcdir)/misc.c $(srcdir)/compat.c \
+-	   $(srcdir)/mbutil.c
++	   $(srcdir)/mbutil.c $(srcdir)/support/wcwidth.c
+ 
+ # The header files for this library.
+ HSOURCES = readline.h rldefs.h chardefs.h keymaps.h history.h histlib.h \
+@@ -123,7 +129,8 @@ TILDEOBJ = tilde.o
+ OBJECTS = readline.o vi_mode.o funmap.o keymaps.o parens.o search.o \
+ 	  rltty.o complete.o bind.o isearch.o display.o signals.o \
+ 	  util.o kill.o undo.o macro.o input.o callback.o terminal.o \
+-	  text.o nls.o misc.o compat.o xmalloc.o $(HISTOBJ) $(TILDEOBJ)
++	  text.o nls.o misc.o compat.o xmalloc.o $(HISTOBJ) $(TILDEOBJ) \
++	  $(WCWIDTH_OBJ)
+ 
+ # The texinfo files which document this library.
+ DOCSOURCE = doc/rlman.texinfo doc/rltech.texinfo doc/rluser.texinfo
+@@ -159,6 +166,10 @@ libhistory.a: $(HISTOBJ) xmalloc.o
+ 	$(AR) $(ARFLAGS) $@ $(HISTOBJ) xmalloc.o
+ 	-test -n "$(RANLIB)" && $(RANLIB) $@
+ 
++wcwidth.o: $(srcdir)/support/wcwidth.c
++	$(RM) $@
++	$(CC) $(CCFLAGS) -c $(srcdir)/support/wcwidth.c
++
+ # Since tilde.c is shared between readline and bash, make sure we compile
+ # it with the right flags when it's built as part of readline
+ tilde.o:	tilde.c
+@@ -191,7 +202,6 @@ stamp-h: config.status $(srcdir)/config.
+ #$(srcdir)/configure: $(srcdir)/configure.in	## Comment-me-out in distribution
+ #	cd $(srcdir) && autoconf	## Comment-me-out in distribution
+ 
+-
+ shared:	force
+ 	-test -d shlib || mkdir shlib
+ 	-( cd shlib ; ${MAKE} ${MFLAGS} all )
+@@ -217,6 +227,16 @@ uninstall-headers:
+ 
+ maybe-uninstall-headers: uninstall-headers
+ 
++## CYGNUS LOCAL
++## Don't mess with people's installed readline's.
++## This tries to install this version of readline over whatever
++## version is already installed on the system (which could be a
++## newer version). There is no real reason for us to install
++## readline along with GDB. GDB links statically against readline,
++## so it doesn't depend on us installing it on the system.
++
++#install:
++
+ install:	$(INSTALL_TARGETS)
+ 
+ install-static: installdirs $(STATIC_LIBS) install-headers install-doc
+diff -ipuwr readline-5.2-orig/bind.c readline-5.2-src/bind.c
+--- readline-5.2-orig/bind.c	2006-07-27 16:44:10.000000000 +0200
++++ readline-5.2-src/bind.c	2006-11-12 11:35:53.375000000 +0100
+@@ -53,6 +53,11 @@
+ extern int errno;
+ #endif /* !errno */
+ 
++#ifdef _WIN32
++#include <sys/stat.h>
++#include <io.h>
++#endif
++
+ #include "posixstat.h"
+ 
+ /* System-specific feature definitions and include files. */
+@@ -865,6 +870,19 @@ _rl_read_init_file (filename, include_le
+   buffer = _rl_read_file (openname, &file_size);
+   free (openname);
+ 
++#if defined (_WIN32) && defined (INITFILES_IN_REGISTRY)
++  if (buffer == 0)
++    {
++      openname = _rl_get_user_registry_string(READLINE_REGKEY,
++                                              INPUTRC_REGVAL);
++      if (openname)
++        {
++          buffer = _rl_read_file (openname, &file_size);
++          free (openname);
++        }
++    }
++#endif	/* _WIN32 */
++
+   if (buffer == 0)
+     return (errno);
+   
+diff -ipuwr readline-5.2-orig/chardefs.h readline-5.2-src/chardefs.h
+--- readline-5.2-orig/chardefs.h	2005-09-25 01:27:08.000000000 +0200
++++ readline-5.2-src/chardefs.h	2006-11-12 11:37:43.390625000 +0100
+@@ -53,6 +53,11 @@
+ /* Some character stuff. */
+ #define control_character_threshold 0x020   /* Smaller than this is control. */
+ #define control_character_mask 0x1f	    /* 0x20 - 1 */
++#define control_character_bit 0x40	    /* 0x000000, must be off. */
++
++/* Some character stuff. */
++#define control_character_threshold 0x020   /* Smaller than this is control. */
++#define control_character_mask 0x1f         /* 0x20 - 1 */
+ #define meta_character_threshold 0x07f	    /* Larger than this is Meta. */
+ #define control_character_bit 0x40	    /* 0x000000, must be off. */
+ #define meta_character_bit 0x080	    /* x0000000, must be on. */
+diff -ipuwr readline-5.2-orig/complete.c readline-5.2-src/complete.c
+--- readline-5.2-orig/complete.c	2006-07-28 18:35:50.000000000 +0200
++++ readline-5.2-src/complete.c	2006-11-12 12:42:55.125000000 +0100
+@@ -43,6 +43,11 @@
+ 
+ #include <stdio.h>
+ 
++#ifdef _WIN32
++# include <windows.h>
++# include <io.h>
++#endif
++
+ #include <errno.h>
+ #if !defined (errno)
+ extern int errno;
+@@ -64,7 +69,7 @@ extern int errno;
+ #include "xmalloc.h"
+ #include "rlprivate.h"
+ 
+-#ifdef __STDC__
++#if defined (__STDC__) || defined (_WIN32)
+ typedef int QSFUNC (const void *, const void *);
+ #else
+ typedef int QSFUNC ();
+@@ -1827,6 +1832,7 @@ rl_completion_matches (text, entry_funct
+ /* A completion function for usernames.
+    TEXT contains a partial username preceded by a random
+    character (usually `~').  */
++#if 0
+ char *
+ rl_username_completion_function (text, state)
+      const char *text;
+@@ -1836,7 +1842,12 @@ rl_username_completion_function (text, s
+   return (char *)NULL;
+ #else /* !__WIN32__ && !__OPENNT) */
+   static char *username = (char *)NULL;
++#ifndef _WIN32
+   static struct passwd *entry;
++#else
++  char user_name[128];
++  unsigned user_len;
++#endif
+   static int namelen, first_char, first_char_loc;
+   char *value;
+ 
+@@ -1849,9 +1860,12 @@ rl_username_completion_function (text, s
+ 
+       username = savestring (&text[first_char_loc]);
+       namelen = strlen (username);
++#ifndef _WIN32
+       setpwent ();
++#endif
+     }
+ 
++#ifndef _WIN32
+ #if defined (HAVE_GETPWENT)
+   while (entry = getpwent ())
+     {
+@@ -1881,8 +1895,100 @@ rl_username_completion_function (text, s
+ 
+       return (value);
+     }
++#else /* _WIN32 */
++  if (GetUserName (user_name, &user_len))
++    {
++      if (namelen == 0 || (!strnicmp (username, user_name, name_len)))
++	{
++	  value = (char *)xmalloc (2 + strlen (user_name));
++	  *value = *text;
++	  strcpy (value + first_char_loc, user_name);
++	  if (first_char == '~')
++	    rl_filename_completion_desired = 1;
++	  return (value);
++	}
++    }
++  return ((char *)NULL);
++#endif /* _WIN32 */
+ #endif /* !__WIN32__ && !__OPENNT */
+ }
++#endif /* 0 */
++
++char *
++rl_username_completion_function (text, state)
++     const char *text;
++     int state;
++{
++  static char *username = (char *)NULL;
++#if !defined (_WIN32)
++  static struct passwd *entry;
++#else
++  char user_name[128];
++  unsigned user_len;
++#endif
++  static int namelen, first_char, first_char_loc;
++  char *value;
++
++  if (state == 0)
++    {
++      FREE (username);
++
++      first_char = *text;
++      first_char_loc = first_char == '~';
++
++      username = savestring (&text[first_char_loc]);
++      namelen = strlen (username);
++#if !defined (_WIN32)
++      setpwent ();
++#endif
++    }
++
++#if !defined (_WIN32)
++#if defined (HAVE_GETPWENT)
++  while (entry = getpwent ())
++    {
++      /* Null usernames should result in all users as possible completions. */
++      if (namelen == 0 || (STREQN (username, entry->pw_name, namelen)))
++	break;
++    }
++#endif
++
++  if (entry == 0)
++    {
++#if defined (HAVE_GETPWENT)
++      endpwent ();
++#endif
++      return ((char *)NULL);
++    }
++  else
++    {
++      value = (char *)xmalloc (2 + strlen (entry->pw_name));
++
++      *value = *text;
++
++      strcpy (value + first_char_loc, entry->pw_name);
++
++      if (first_char == '~')
++	rl_filename_completion_desired = 1;
++
++      return (value);
++    }
++#else /* _WIN32 */
++  if (GetUserName (user_name, &user_len))
++    {
++      if (namelen == 0 || (!strnicmp (username, user_name, namelen)))
++	{
++	  value = (char *)xmalloc (2 + strlen (user_name));
++	  *value = *text;
++	  strcpy (value + first_char_loc, user_name);
++	  if (first_char == '~')
++	    rl_filename_completion_desired = 1;
++	  return (value);
++	}
++    }
++  return ((char *)NULL);
++#endif /* _WIN32 */
++}
+ 
+ /* Okay, now we write the entry_function for filename completion.  In the
+    general case.  Note that completion in the shell is a little different
+@@ -1893,14 +1999,22 @@ rl_filename_completion_function (text, s
+      const char *text;
+      int state;
+ {
++#ifdef _WIN32
++  static WIN32_FIND_DATA entry;
++  static HANDLE directory = NULL;
++  static BOOL found = 0;
++  char tmp[MAX_PATH];
++# define DIR void
++#else
++  struct dirent *entry;
+   static DIR *directory = (DIR *)NULL;
++#endif
+   static char *filename = (char *)NULL;
+   static char *dirname = (char *)NULL;
+   static char *users_dirname = (char *)NULL;
+   static int filename_len;
+   char *temp;
+   int dirlen;
+-  struct dirent *entry;
+ 
+   /* If we don't have any state, then do some initialization. */
+   if (state == 0)
+@@ -1977,7 +2091,19 @@ rl_filename_completion_function (text, s
+ 	  free (users_dirname);
+ 	  users_dirname = temp;
+ 	}
++
++#ifdef _WIN32
++      strcpy (tmp, dirname);
++      if (tmp[strlen (tmp) - 1] == '/')
++	strcat (tmp, "*");
++      else
++	strcat (tmp, "/*");
++
++      directory = FindFirstFile (tmp, &entry);
++      found = 1;
++#else
+       directory = opendir (dirname);
++#endif
+ 
+       /* Now dequote a non-null filename. */
+       if (filename && *filename && rl_completion_found_quote && rl_filename_dequoting_function)
+@@ -1999,21 +2125,24 @@ rl_filename_completion_function (text, s
+   /* *** UNIMPLEMENTED *** */
+ 
+   /* Now that we have some state, we can read the directory. */
+-
++#ifndef _WIN32
+   entry = (struct dirent *)NULL;
+   while (directory && (entry = readdir (directory)))
++#else
++  while (directory != INVALID_HANDLE_VALUE && directory && found)
++#endif
+     {
+       /* Special case for no filename.  If the user has disabled the
+          `match-hidden-files' variable, skip filenames beginning with `.'.
+ 	 All other entries except "." and ".." match. */
+       if (filename_len == 0)
+ 	{
+-	  if (_rl_match_hidden_files == 0 && HIDDEN_FILE (entry->d_name))
++	  if (_rl_match_hidden_files == 0 && HIDDEN_FILE (FILENAME (entry)))
+ 	    continue;
+ 
+-	  if (entry->d_name[0] != '.' ||
+-	       (entry->d_name[1] &&
+-		 (entry->d_name[1] != '.' || entry->d_name[2])))
++	  if (FILENAME (entry)[0] != '.' ||
++	       (FILENAME (entry)[1] &&
++		 (FILENAME (entry)[1] != '.' || FILENAME (entry)[2])))
+ 	    break;
+ 	}
+       else
+@@ -2022,22 +2151,29 @@ rl_filename_completion_function (text, s
+ 	     it is a match. */
+ 	  if (_rl_completion_case_fold)
+ 	    {
+-	      if ((_rl_to_lower (entry->d_name[0]) == _rl_to_lower (filename[0])) &&
++	      if ((_rl_to_lower (FILENAME (entry)[0]) == _rl_to_lower (filename[0])) &&
+ 		  (((int)D_NAMLEN (entry)) >= filename_len) &&
+-		  (_rl_strnicmp (filename, entry->d_name, filename_len) == 0))
++		  (_rl_strnicmp (filename, FILENAME (entry), filename_len) == 0))
+ 		break;
+ 	    }
+ 	  else
+ 	    {
+-	      if ((entry->d_name[0] == filename[0]) &&
++	      if ((FILENAME (entry)[0] == filename[0]) &&
+ 		  (((int)D_NAMLEN (entry)) >= filename_len) &&
+-		  (strncmp (filename, entry->d_name, filename_len) == 0))
++		  (strncmp (filename, FILENAME (entry), filename_len) == 0))
+ 		break;
+ 	    }
+ 	}
++#ifdef _WIN32
++      found = FindNextFile (directory, &entry);
++#endif
+     }
+ 
++#ifdef _WIN32
++  if (!found)
++#else
+   if (entry == 0)
++#endif
+     {
+       if (directory)
+ 	{
+@@ -2090,11 +2226,14 @@ rl_filename_completion_function (text, s
+ 		temp[dirlen++] = '/';
+ 	    }
+ 
+-	  strcpy (temp + dirlen, entry->d_name);
++	  strcpy (temp + dirlen, FILENAME (entry));
+ 	}
+       else
+-	temp = savestring (entry->d_name);
++	temp = savestring (FILENAME (entry));
+ 
++#ifdef _WIN32
++      found = FindNextFile (directory, &entry);
++#endif
+       return (temp);
+     }
+ }
+diff -ipuwr readline-5.2-orig/config.h.in readline-5.2-src/config.h.in
+--- readline-5.2-orig/config.h.in	2006-09-12 23:02:00.000000000 +0200
++++ readline-5.2-src/config.h.in	2006-11-12 11:37:43.406250000 +0100
+@@ -65,6 +65,9 @@
+ /* Define if you have the mbrtowc function. */
+ #undef HAVE_MBRTOWC
+ 
++/* Define if you have the mbrtowc function. */
++#undef HAVE_MBRTOWC
++
+ /* Define if you have the mbsrtowcs function. */
+ #undef HAVE_MBSRTOWCS
+ 
+diff -ipuwr readline-5.2-orig/configure.in readline-5.2-src/configure.in
+--- readline-5.2-orig/configure.in	2006-09-28 19:04:24.000000000 +0200
++++ readline-5.2-src/configure.in	2006-11-12 11:37:43.421875000 +0100
+@@ -30,7 +30,7 @@ dnl make sure we are using a recent auto
+ AC_PREREQ(2.50)
+ 
+ AC_CONFIG_SRCDIR(readline.h)
+-AC_CONFIG_AUX_DIR(./support)
++dnl AC_CONFIG_AUX_DIR(./support)
+ AC_CONFIG_HEADERS(config.h)
+ 
+ dnl update the value of RL_READLINE_VERSION in readline.h when this changes
+@@ -111,6 +111,44 @@ AC_PROG_CC
+ dnl AC_AIX
+ AC_MINIX
+ 
++dnl BEGIN changes for CYGNUS cross-building for Cygwin
++ 
++dnl load up the cross-building cache file -- add more cases and cache
++dnl files as necessary
++if test "x$cross_compiling" = "xyes"; then
++    case "${host}" in
++    *-cygwin*)
++	cross_cache=${srcdir}/cross-build/cygwin.cache
++	if test -r "${cross_cache}"; then
++	    echo "loading cross-build cache file ${cross_cache}"
++	    . ${cross_cache}
++	fi
++	LOCAL_CFLAGS="$LOCAL_CFLAGS -I${srcdir}/../libtermcap"
++	unset cross_cache
++	;;
++    *)  echo "configure: cross-compiling for a non-cygwin target is not supported" >&2
++	;;
++    esac
++fi
++ 
++if test "x$cross_compiling" = "xyes"; then
++  CROSS_COMPILING_FLAG=-DCROSS_COMPILING
++else
++  CROSS_COMPILING_FLAG=
++fi
++AC_SUBST(CROSS_COMPILING_FLAG)
++ 
++if test -z "$CC_FOR_BUILD"; then
++    if test "x$cross_compiling" = "xno"; then
++        CC_FOR_BUILD='$(CC)'
++    else
++        CC_FOR_BUILD=gcc
++    fi
++fi
++AC_SUBST(CC_FOR_BUILD)
++ 
++dnl END changes for CYGNUS cross-building for Cygwin
++
+ # If we're using gcc and the user hasn't specified CFLAGS, add -O to CFLAGS.
+ test -n "$GCC" && test -n "$auto_cflags" && CFLAGS="$CFLAGS -O"
+ 
+diff -ipuwr readline-5.2-orig/display.c readline-5.2-src/display.c
+--- readline-5.2-orig/display.c	2006-09-14 21:20:12.000000000 +0200
++++ readline-5.2-src/display.c	2006-11-12 12:35:23.453125000 +0100
+@@ -41,6 +41,10 @@
+ 
+ #include <stdio.h>
+ 
++#ifdef __MSDOS__
++# include <pc.h>
++#endif
++
+ /* System-specific feature definitions and include files. */
+ #include "rldefs.h"
+ #include "rlmbutil.h"
+@@ -55,6 +59,14 @@
+ #include "rlprivate.h"
+ #include "xmalloc.h"
+ 
++#if defined (_WIN32)
++#include <windows.h>
++extern int haveConsole;
++extern HANDLE hStdout, hStdin;
++extern COORD rlScreenEnd;
++extern int rlScreenMax;
++#endif /* _WIN32 */
++
+ #if !defined (strchr) && !defined (__STDC__)
+ extern char *strchr (), *strrchr ();
+ #endif /* !strchr && !__STDC__ */
+@@ -65,6 +77,11 @@ static void delete_chars PARAMS((int));
+ static void insert_some_chars PARAMS((char *, int, int));
+ static void cr PARAMS((void));
+ 
++#ifdef _WIN32
++# define putc(ch, stream) \
++if ((ch) == '\r') cr (); else _rl_output_character_function (ch)
++#endif
++
+ #if defined (HANDLE_MULTIBYTE)
+ static int _rl_col_width PARAMS((const char *, int, int));
+ static int *_rl_wrapped_line;
+@@ -1001,7 +1018,7 @@ rl_redisplay ()
+ 	      _rl_last_c_pos < PROMPT_ENDING_INDEX && local_prompt)
+ #endif
+ 	    {
+-#if defined (__MSDOS__)
++#if defined (__MSDOS__) || defined (_WIN32)
+ 	      putc ('\r', rl_outstream);
+ #else
+ 	      if (_rl_term_cr)
+@@ -1436,7 +1453,7 @@ update_line (old, new, current_line, oma
+       _rl_term_cr && lendiff > prompt_visible_length && _rl_last_c_pos > 0 &&
+       od >= lendiff && _rl_last_c_pos < PROMPT_ENDING_INDEX)
+     {
+-#if defined (__MSDOS__)
++#if defined (__MSDOS__) || defined (_WIN32)
+       putc ('\r', rl_outstream);
+ #else
+       tputs (_rl_term_cr, 1, _rl_output_character_function);
+@@ -1504,6 +1521,7 @@ update_line (old, new, current_line, oma
+ 
+   if (col_lendiff > 0)	/* XXX - was lendiff */
+     {
++#ifndef _WIN32
+       /* Non-zero if we're increasing the number of lines. */
+       int gl = current_line >= _rl_vis_botlin && inv_botlin > _rl_vis_botlin;
+       /* Sometimes it is cheaper to print the characters rather than
+@@ -1557,6 +1575,7 @@ update_line (old, new, current_line, oma
+ 	    }
+ 	}
+       else
++#endif /* !_WIN32 */
+ 	{
+ 	  /* cannot insert chars, write to EOL */
+ 	  _rl_output_some_chars (nfd, temp);
+@@ -1569,6 +1588,7 @@ update_line (old, new, current_line, oma
+     }
+   else				/* Delete characters from line. */
+     {
++#ifndef _WIN32
+       /* If possible and inexpensive to use terminal deletion, then do so. */
+       if (_rl_term_dc && (2 * col_temp) >= -col_lendiff)
+ 	{
+@@ -1592,6 +1612,7 @@ update_line (old, new, current_line, oma
+ 	}
+       /* Otherwise, print over the existing material. */
+       else
++#endif /* !_WIN32 */
+ 	{
+ 	  if (temp > 0)
+ 	    {
+@@ -1717,6 +1738,16 @@ _rl_move_cursor_relative (new, data)
+      int new;
+      const char *data;
+ {
++#ifdef _WIN32
++  CONSOLE_SCREEN_BUFFER_INFO     csbi;
++  if ( (_rl_last_c_pos != new)
++       && haveConsole && GetConsoleScreenBufferInfo(hStdout, &csbi) )
++    {
++      csbi.dwCursorPosition.X += new - _rl_last_c_pos;
++      if ( SetConsoleCursorPosition(hStdout, csbi.dwCursorPosition) )
++   _rl_last_c_pos = new;
++    }
++#else /* _WIN32 */
+   register int i;
+   int woff;			/* number of invisible chars on current line */
+   int cpos, dpos;		/* current and desired cursor positions */
+@@ -1797,9 +1828,7 @@ _rl_move_cursor_relative (new, data)
+ 	    }
+ 	  else
+ 	    {
+-	      tputs (_rl_term_cr, 1, _rl_output_character_function);
+-	      for (i = 0; i < new; i++)
+-		putc (data[i], rl_outstream);
++	      _rl_backspace (_rl_last_c_pos - _rl_col_width (data, 0, new));
+ 	    }
+ 	}
+       else
+@@ -1817,6 +1846,7 @@ _rl_move_cursor_relative (new, data)
+     _rl_backspace (cpos - dpos);
+ 
+   _rl_last_c_pos = dpos;
++#endif /* !_WIN32 */
+ }
+ 
+ /* PWP: move the cursor up or down. */
+@@ -1824,6 +1854,16 @@ void
+ _rl_move_vert (to)
+      int to;
+ {
++#if defined (_WIN32)
++  CONSOLE_SCREEN_BUFFER_INFO	csbi;
++  if ( (_rl_last_v_pos != to) && (to <= _rl_screenheight)
++       && haveConsole && GetConsoleScreenBufferInfo(hStdout, &csbi) )
++    {
++      csbi.dwCursorPosition.Y += to - _rl_last_v_pos;
++      if ( SetConsoleCursorPosition(hStdout, csbi.dwCursorPosition) )
++	_rl_last_v_pos = to;
++    }
++#else /* !_WIN32 */
+   register int delta, i;
+ 
+   if (_rl_last_v_pos == to || to > _rl_screenheight)
+@@ -1842,12 +1882,22 @@ _rl_move_vert (to)
+     }
+   else
+     {			/* delta < 0 */
++#ifdef __MSDOS__
++      int row, col;
++
++      fflush (rl_outstream); /* make sure the cursor pos is current! */
++      ScreenGetCursor (&row, &col);
++      ScreenSetCursor (row + delta, col);
++      i = -delta;    /* in case someone wants to use it after the loop */
++#else /* !__MSDOS__ */
+       if (_rl_term_up && *_rl_term_up)
+ 	for (i = 0; i < -delta; i++)
+ 	  tputs (_rl_term_up, 1, _rl_output_character_function);
++#endif /* !__MSDOS__ */
+     }
+ 
+   _rl_last_v_pos = to;		/* Now TO is here */
++#endif /* _WIN32 */
+ }
+ 
+ /* Physically print C on rl_outstream.  This is for functions which know
+@@ -2104,10 +2154,31 @@ void
+ _rl_clear_to_eol (count)
+      int count;
+ {
++#if defined (_WIN32)
++  CONSOLE_SCREEN_BUFFER_INFO	csbi;
++  if (haveConsole && GetConsoleScreenBufferInfo(hStdout, &csbi))
++    {
++      DWORD written;
++      int linear_pos;
++
++      linear_pos = (int)csbi.dwCursorPosition.Y * (int)csbi.dwSize.X
++	+ (int)csbi.dwCursorPosition.X;
++      if (linear_pos < rlScreenMax)
++	{
++	  rlScreenEnd = csbi.dwCursorPosition;
++	  rlScreenMax = linear_pos;
++	}
++      FillConsoleOutputCharacter(hStdout, ' ', count, csbi.dwCursorPosition, &written);
++    }
++#else /* !_WIN32 */
++#ifndef __MSDOS__
+   if (_rl_term_clreol)
+     tputs (_rl_term_clreol, 1, _rl_output_character_function);
+-  else if (count)
++  else
++#endif
++  if (count)
+     space_to_eol (count);
++#endif /* _WIN32 */
+ }
+ 
+ /* Clear to the end of the line using spaces.  COUNT is the minimum
+@@ -2116,32 +2187,39 @@ static void
+ space_to_eol (count)
+      int count;
+ {
++#if defined (_WIN32)
++  _rl_clear_to_eol (count);
++#else
+   register int i;
+ 
+   for (i = 0; i < count; i++)
+    putc (' ', rl_outstream);
+ 
+   _rl_last_c_pos += count;
++#endif /* _WIN32 */
+ }
+ 
+ void
+ _rl_clear_screen ()
+ {
++#if !defined (_WIN32)
+   if (_rl_term_clrpag)
+     tputs (_rl_term_clrpag, 1, _rl_output_character_function);
+   else
++#endif /* !_WIN32 */
+     rl_crlf ();
+ }
+ 
+ /* Insert COUNT characters from STRING to the output stream at column COL. */
++#if !defined (_WIN32)
+ static void
+ insert_some_chars (string, count, col)
+      char *string;
+      int count, col;
+ {
+-#if defined (__MSDOS__) || defined (__MINGW32__)
++#if defined (__MSDOS__)
+   _rl_output_some_chars (string, count);
+-#else
++#else  /* !__MSDOS__ */
+   /* DEBUGGING */
+   if (MB_CUR_MAX == 1 || rl_byte_oriented)
+     if (count != col)
+@@ -2180,7 +2258,7 @@ insert_some_chars (string, count, col)
+       if (_rl_term_ei && *_rl_term_ei)
+ 	tputs (_rl_term_ei, 1, _rl_output_character_function);
+     }
+-#endif /* __MSDOS__ || __MINGW32__ */
++#endif /* !__MSDOS__ */
+ }
+ 
+ /* Delete COUNT characters from the display line. */
+@@ -2191,7 +2269,7 @@ delete_chars (count)
+   if (count > _rl_screenwidth)	/* XXX */
+     return;
+ 
+-#if !defined (__MSDOS__) && !defined (__MINGW32__)
++#if !defined (__MSDOS__)
+   if (_rl_term_DC && *_rl_term_DC)
+     {
+       char *buffer;
+@@ -2204,8 +2282,9 @@ delete_chars (count)
+ 	while (count--)
+ 	  tputs (_rl_term_dc, 1, _rl_output_character_function);
+     }
+-#endif /* !__MSDOS__ && !__MINGW32__ */
++#endif /* !__MSDOS__ */
+ }
++#endif /* !_WIN32 */
+ 
+ void
+ _rl_update_final ()
+@@ -2243,6 +2322,9 @@ _rl_update_final ()
+ static void
+ cr ()
+ {
++#if defined (_WIN32)
++  _rl_move_cursor_relative (0, 0);
++#else
+   if (_rl_term_cr)
+     {
+ #if defined (__MSDOS__)
+@@ -2252,6 +2334,7 @@ cr ()
+ #endif
+       _rl_last_c_pos = 0;
+     }
++#endif /* _WIN32 */
+ }
+ 
+ /* Redraw the last line of a multi-line prompt that may possibly contain
+@@ -2290,7 +2373,11 @@ _rl_redisplay_after_sigwinch ()
+      the right thing happens if we have wrapped to a new screen line. */
+   if (_rl_term_cr)
+     {
+-#if defined (__MSDOS__)
++#if defined (_WIN32)
++      _rl_move_cursor_relative (0, 0);
++      space_to_eol (_rl_screenwidth);
++      _rl_move_cursor_relative (0, 0);
++#elif defined (__MSDOS__)
+       putc ('\r', rl_outstream);
+ #else
+       tputs (_rl_term_cr, 1, _rl_output_character_function);
+@@ -2299,7 +2386,7 @@ _rl_redisplay_after_sigwinch ()
+ #if defined (__MSDOS__)
+       space_to_eol (_rl_screenwidth);
+       putc ('\r', rl_outstream);
+-#else
++#elif !defined (_WIN32)
+       if (_rl_term_clreol)
+ 	tputs (_rl_term_clreol, 1, _rl_output_character_function);
+       else
+diff -ipuwr readline-5.2-orig/examples/excallback.c readline-5.2-src/examples/excallback.c
+--- readline-5.2-orig/examples/excallback.c	2006-03-21 16:07:52.000000000 +0100
++++ readline-5.2-src/examples/excallback.c	2006-11-01 11:18:13.343750000 +0100
+@@ -157,7 +157,7 @@ process_line(char *line)
+     fprintf(stderr, "|%s|\n", line);
+   }
+ 
+-  free (line);
++  rl_free (line);
+ }
+ 
+ int
+diff -ipuwr readline-5.2-orig/examples/fileman.c readline-5.2-src/examples/fileman.c
+--- readline-5.2-orig/examples/fileman.c	2002-04-16 23:50:56.000000000 +0200
++++ readline-5.2-src/examples/fileman.c	2006-11-01 11:18:45.203125000 +0100
+@@ -145,7 +145,7 @@ main (argc, argv)
+           execute_line (s);
+         }
+ 
+-      free (line);
++      rl_free (line);
+     }
+   exit (0);
+ }
+diff -ipuwr readline-5.2-orig/examples/histexamp.c readline-5.2-src/examples/histexamp.c
+--- readline-5.2-orig/examples/histexamp.c	2005-08-02 23:21:36.000000000 +0200
++++ readline-5.2-src/examples/histexamp.c	2006-11-01 11:35:02.484375000 +0100
+@@ -67,13 +67,13 @@ main (argc, argv)
+ 
+ 	  if (result < 0 || result == 2)
+ 	    {
+-	      free (expansion);
++	      rl_free (expansion);
+ 	      continue;
+ 	    }
+ 
+ 	  add_history (expansion);
+ 	  strncpy (line, expansion, sizeof (line) - 1);
+-	  free (expansion);
++	  rl_free (expansion);
+ 	}
+ 
+       if (strcmp (line, "quit") == 0)
+@@ -111,8 +111,8 @@ main (argc, argv)
+ 		fprintf (stderr, "No such entry %d\n", which);
+ 	      else
+ 		{
+-		  free (entry->line);
+-		  free (entry);
++		  rl_free (entry->line);
++		  rl_free (entry);
+ 		}
+ 	    }
+ 	  else
+diff -ipuwr readline-5.2-orig/examples/manexamp.c readline-5.2-src/examples/manexamp.c
+--- readline-5.2-orig/examples/manexamp.c	2002-04-16 23:53:02.000000000 +0200
++++ readline-5.2-src/examples/manexamp.c	2006-11-01 11:36:21.875000000 +0100
+@@ -40,7 +40,7 @@ rl_gets ()
+      to the free pool. */
+   if (line_read)
+     {
+-      free (line_read);
++      rl_free (line_read);
+       line_read = (char *)NULL;
+     }
+ 
+diff -ipuwr readline-5.2-orig/examples/readlinebuf.h readline-5.2-src/examples/readlinebuf.h
+--- readline-5.2-orig/examples/readlinebuf.h	2001-09-24 15:39:34.000000000 +0200
++++ readline-5.2-src/examples/readlinebuf.h	2006-11-01 11:37:17.234375000 +0100
+@@ -72,7 +72,7 @@ protected:
+ 			
+ 		if ( rd < n ) {
+ 			low_ = high_ = 0;
+-			free( line_ ); // free( NULL ) is a noop
++			rl_free( line_ ); // free( NULL ) is a noop
+ 			line_ = readline( prompt_ );
+ 			if ( line_ ) {
+ 				high_ = strlen( line_ );
+@@ -87,7 +87,7 @@ protected:
+ 	virtual int_type underflow() {
+ 		if ( high_ == low_ ) {
+ 			low_ = high_ = 0;
+-			free( line_ ); // free( NULL ) is a noop
++			rl_free( line_ ); // free( NULL ) is a noop
+ 			line_ = readline( prompt_ );
+ 			if ( line_ ) {
+ 				high_ = strlen( line_ );
+diff -ipuwr readline-5.2-orig/examples/rl-fgets.c readline-5.2-src/examples/rl-fgets.c
+--- readline-5.2-orig/examples/rl-fgets.c	2004-04-22 23:52:18.000000000 +0200
++++ readline-5.2-src/examples/rl-fgets.c	2006-11-01 11:44:27.296875000 +0100
+@@ -336,26 +336,26 @@ fgets (
+     ) ;
+     if ( ! strncmp(my_fgets_line, "_fgets_reset_", 13) ) {
+       my_fgets_reset () ;
+-      free ( my_fgets_line ) ;
++      rl_free ( my_fgets_line ) ;
+       strcpy ( s, "\n" ) ;
+       return ( s ) ;
+     }
+     if ( ! strncmp(my_fgets_line, "_fgets_dump_", 12) ) {
+       my_fgets_dump () ;
+-      free ( my_fgets_line ) ;
++      rl_free ( my_fgets_line ) ;
+       strcpy ( s, "\n" ) ;
+       return ( s ) ;
+     }
+     if ( ! strncmp(my_fgets_line, "_fgets_debug_", 13) ) {
+       my_fgets_debug_toggle () ;
+-      free ( my_fgets_line ) ;
++      rl_free ( my_fgets_line ) ;
+       strcpy ( s, "\n" ) ;
+       return ( s ) ;
+     }
+     (void) strncpy ( s, my_fgets_line, n-1 ) ;
+     (void) strcat ( s, "\n" ) ;
+     if ( *my_fgets_line ) add_history ( my_fgets_line ) ;
+-    free ( my_fgets_line ) ;
++    rl_free ( my_fgets_line ) ;
+     return ( s ) ;
+   } else {
+     static fgets_t _fgets ;
+diff -ipuwr readline-5.2-orig/examples/rlfe/rlfe.c readline-5.2-src/examples/rlfe/rlfe.c
+--- readline-5.2-orig/examples/rlfe/rlfe.c	2004-11-04 23:32:14.000000000 +0100
++++ readline-5.2-src/examples/rlfe/rlfe.c	2006-11-01 11:39:56.750000000 +0100
+@@ -338,7 +338,7 @@ line_handler (char *line)
+           if (*line)
+             add_history (line);
+         }
+-      free (line);
++      rl_free (line);
+     }
+   rl_callback_handler_remove ();
+   buf_count = 0;
+diff -ipuwr readline-5.2-orig/examples/rltest.c readline-5.2-src/examples/rltest.c
+--- readline-5.2-orig/examples/rltest.c	2005-08-02 23:25:10.000000000 +0200
++++ readline-5.2-src/examples/rltest.c	2006-11-01 11:45:13.296875000 +0100
+@@ -87,7 +87,7 @@ main ()
+ 		fprintf (stderr, "%d: %s\r\n", i, list[i]->line);
+ 	    }
+ 	}
+-      free (temp);
++      rl_free (temp);
+     }
+   exit (0);
+ }
+diff -ipuwr readline-5.2-orig/funmap.c readline-5.2-src/funmap.c
+--- readline-5.2-orig/funmap.c	2005-03-26 01:23:38.000000000 +0100
++++ readline-5.2-src/funmap.c	2006-11-12 11:37:43.437500000 +0100
+@@ -40,13 +40,13 @@
+ 
+ #include "xmalloc.h"
+ 
+-#ifdef __STDC__
++#if defined (__STDC__ ) || defined (_WIN32)
+ typedef int QSFUNC (const void *, const void *);
+ #else
+ typedef int QSFUNC ();
+ #endif
+ 
+-extern int _rl_qsort_string_compare PARAMS((char **, char **));
++READLINE_DLL_IMPEXP int _rl_qsort_string_compare PARAMS((char **, char **));
+ 
+ FUNMAP **funmap;
+ static int funmap_size;
+@@ -55,7 +55,9 @@ static int funmap_entry;
+ /* After initializing the function map, this is the index of the first
+    program specific function. */
+ int funmap_program_specific_entry_start;
+-
++#ifdef READLINE_DLL_IMPEXP
++# undef READLINE_DLL_IMPEXP      
++#endif /* READLINE_DLL_IMPEXP */
+ static FUNMAP default_funmap[] = {
+   { "abort", rl_abort },
+   { "accept-line", rl_newline },
+@@ -111,7 +113,7 @@ static FUNMAP default_funmap[] = {
+   { "non-incremental-forward-search-history-again", rl_noninc_forward_search_again },
+   { "non-incremental-reverse-search-history-again", rl_noninc_reverse_search_again },
+   { "overwrite-mode", rl_overwrite_mode },
+-#ifdef __CYGWIN__
++#if defined (__CYGWIN__) || defined (_WIN32)
+   { "paste-from-clipboard", rl_paste_from_clipboard },
+ #endif
+   { "possible-completions", rl_possible_completions },
+diff -ipuwr readline-5.2-orig/histfile.c readline-5.2-src/histfile.c
+--- readline-5.2-orig/histfile.c	2006-03-31 23:48:44.000000000 +0200
++++ readline-5.2-src/histfile.c	2006-11-12 11:37:43.453125000 +0100
+@@ -53,7 +53,7 @@
+ #  include <unistd.h>
+ #endif
+ 
+-#if defined (__EMX__) || defined (__CYGWIN__)
++#if defined (__EMX__) || defined (__CYGWIN__) || defined (__MINW32__)
+ #  undef HAVE_MMAP
+ #endif
+ 
+@@ -74,18 +74,22 @@
+ 
+ #endif /* HISTORY_USE_MMAP */
+ 
++#ifdef _WIN32
++#include <io.h>
++#endif
++
+ /* If we're compiling for __EMX__ (OS/2) or __CYGWIN__ (cygwin32 environment
+    on win 95/98/nt), we want to open files with O_BINARY mode so that there
+    is no \n -> \r\n conversion performed.  On other systems, we don't want to
+    mess around with O_BINARY at all, so we ensure that it's defined to 0. */
+-#if defined (__EMX__) || defined (__CYGWIN__)
++#if defined (__EMX__) || defined (__CYGWIN__) || defined (_WIN32)
+ #  ifndef O_BINARY
+ #    define O_BINARY 0
+ #  endif
+-#else /* !__EMX__ && !__CYGWIN__ */
++#else /* !__EMX__ && !__CYGWIN__ && !_WIN32 */
+ #  undef O_BINARY
+ #  define O_BINARY 0
+-#endif /* !__EMX__ && !__CYGWIN__ */
++#endif /* !__EMX__ && !__CYGWIN__ && !_WIN32 */
+ 
+ #include <errno.h>
+ #if !defined (errno)
+@@ -105,6 +109,10 @@ int history_write_timestamps = 0;
+    for more extensive tests. */
+ #define HIST_TIMESTAMP_START(s)		(*(s) == history_comment_char)
+ 
++#ifdef _WIN32
++#include "rldefs.h"
++#endif
++
+ /* Return the string that should be used in the place of this
+    filename.  This only matters when you don't specify the
+    filename to read_history (), or write_history (). */
+@@ -125,6 +133,12 @@ history_filename (filename)
+ 
+   if (home == 0)
+     {
++#if defined (_WIN32) && defined (INITFILES_IN_REGISTRY)
++      return_val = _rl_get_user_registry_string (READLINE_REGKEY, HISTFILE_REGVAL);
++      if (return_val)
++        return (return_val);
++      free (return_val);
++#endif	/* _WIN32 ... */
+       home = ".";
+       home_len = 1;
+     }
+diff -ipuwr readline-5.2-orig/history.c readline-5.2-src/history.c
+--- readline-5.2-orig/history.c	2006-05-21 20:39:42.000000000 +0200
++++ readline-5.2-src/history.c	2006-11-12 11:37:43.453125000 +0100
+@@ -248,7 +248,9 @@ hist_inittime ()
+   char ts[64], *ret;
+ 
+   t = (time_t) time ((time_t *)0);
+-#if defined (HAVE_VSNPRINTF)		/* assume snprintf if vsnprintf exists */
++#if defined(_WIN32)
++  _snprintf (ts, sizeof (ts) - 1, "X%lu", (unsigned long) t);
++#elif defined (HAVE_VSNPRINTF)		/* assume snprintf if vsnprintf exists */
+   snprintf (ts, sizeof (ts) - 1, "X%lu", (unsigned long) t);
+ #else
+   sprintf (ts, "X%lu", (unsigned long) t);
+diff -ipuwr readline-5.2-orig/history.h readline-5.2-src/history.h
+--- readline-5.2-orig/history.h	2003-07-31 15:38:44.000000000 +0200
++++ readline-5.2-src/history.h	2006-11-12 11:37:43.453125000 +0100
+@@ -68,93 +68,93 @@ typedef struct _hist_state {
+ 
+ /* Begin a session in which the history functions might be used.  This
+    just initializes the interactive variables. */
+-extern void using_history PARAMS((void));
++READLINE_DLL_IMPEXP void using_history PARAMS((void));
+ 
+ /* Return the current HISTORY_STATE of the history. */
+-extern HISTORY_STATE *history_get_history_state PARAMS((void));
++READLINE_DLL_IMPEXP HISTORY_STATE *history_get_history_state PARAMS((void));
+ 
+ /* Set the state of the current history array to STATE. */
+-extern void history_set_history_state PARAMS((HISTORY_STATE *));
++READLINE_DLL_IMPEXP void history_set_history_state PARAMS((HISTORY_STATE *));
+ 
+ /* Manage the history list. */
+ 
+ /* Place STRING at the end of the history list.
+    The associated data field (if any) is set to NULL. */
+-extern void add_history PARAMS((const char *));
++READLINE_DLL_IMPEXP void add_history PARAMS((const char *));
+ 
+ /* Change the timestamp associated with the most recent history entry to
+    STRING. */
+-extern void add_history_time PARAMS((const char *));
++READLINE_DLL_IMPEXP void add_history_time PARAMS((const char *));
+ 
+ /* A reasonably useless function, only here for completeness.  WHICH
+    is the magic number that tells us which element to delete.  The
+    elements are numbered from 0. */
+-extern HIST_ENTRY *remove_history PARAMS((int));
++READLINE_DLL_IMPEXP HIST_ENTRY *remove_history PARAMS((int));
+ 
+ /* Free the history entry H and return any application-specific data
+    associated with it. */
+-extern histdata_t free_history_entry PARAMS((HIST_ENTRY *));
++READLINE_DLL_IMPEXP histdata_t free_history_entry PARAMS((HIST_ENTRY *));
+ 
+ /* Make the history entry at WHICH have LINE and DATA.  This returns
+    the old entry so you can dispose of the data.  In the case of an
+    invalid WHICH, a NULL pointer is returned. */
+-extern HIST_ENTRY *replace_history_entry PARAMS((int, const char *, histdata_t));
++READLINE_DLL_IMPEXP HIST_ENTRY *replace_history_entry PARAMS((int, const char *, histdata_t));
+ 
+ /* Clear the history list and start over. */
+-extern void clear_history PARAMS((void));
++READLINE_DLL_IMPEXP void clear_history PARAMS((void));
+ 
+ /* Stifle the history list, remembering only MAX number of entries. */
+-extern void stifle_history PARAMS((int));
++READLINE_DLL_IMPEXP void stifle_history PARAMS((int));
+ 
+ /* Stop stifling the history.  This returns the previous amount the
+    history was stifled by.  The value is positive if the history was
+    stifled, negative if it wasn't. */
+-extern int unstifle_history PARAMS((void));
++READLINE_DLL_IMPEXP int unstifle_history PARAMS((void));
+ 
+ /* Return 1 if the history is stifled, 0 if it is not. */
+-extern int history_is_stifled PARAMS((void));
++READLINE_DLL_IMPEXP int history_is_stifled PARAMS((void));
+ 
+ /* Information about the history list. */
+ 
+ /* Return a NULL terminated array of HIST_ENTRY which is the current input
+    history.  Element 0 of this list is the beginning of time.  If there
+    is no history, return NULL. */
+-extern HIST_ENTRY **history_list PARAMS((void));
++READLINE_DLL_IMPEXP HIST_ENTRY **history_list PARAMS((void));
+ 
+ /* Returns the number which says what history element we are now
+    looking at.  */
+-extern int where_history PARAMS((void));
++READLINE_DLL_IMPEXP int where_history PARAMS((void));
+   
+ /* Return the history entry at the current position, as determined by
+    history_offset.  If there is no entry there, return a NULL pointer. */
+-extern HIST_ENTRY *current_history PARAMS((void));
++READLINE_DLL_IMPEXP HIST_ENTRY *current_history PARAMS((void));
+ 
+ /* Return the history entry which is logically at OFFSET in the history
+    array.  OFFSET is relative to history_base. */
+-extern HIST_ENTRY *history_get PARAMS((int));
++READLINE_DLL_IMPEXP HIST_ENTRY *history_get PARAMS((int));
+ 
+ /* Return the timestamp associated with the HIST_ENTRY * passed as an
+    argument */
+-extern time_t history_get_time PARAMS((HIST_ENTRY *));
++READLINE_DLL_IMPEXP time_t history_get_time PARAMS((HIST_ENTRY *));
+ 
+ /* Return the number of bytes that the primary history entries are using.
+    This just adds up the lengths of the_history->lines. */
+-extern int history_total_bytes PARAMS((void));
++READLINE_DLL_IMPEXP int history_total_bytes PARAMS((void));
+ 
+ /* Moving around the history list. */
+ 
+ /* Set the position in the history list to POS. */
+-extern int history_set_pos PARAMS((int));
++READLINE_DLL_IMPEXP int history_set_pos PARAMS((int));
+ 
+ /* Back up history_offset to the previous history entry, and return
+    a pointer to that entry.  If there is no previous entry, return
+    a NULL pointer. */
+-extern HIST_ENTRY *previous_history PARAMS((void));
++READLINE_DLL_IMPEXP HIST_ENTRY *previous_history PARAMS((void));
+ 
+ /* Move history_offset forward to the next item in the input_history,
+    and return the a pointer to that entry.  If there is no next entry,
+    return a NULL pointer. */
+-extern HIST_ENTRY *next_history PARAMS((void));
++READLINE_DLL_IMPEXP HIST_ENTRY *next_history PARAMS((void));
+ 
+ /* Searching the history list. */
+ 
+@@ -164,45 +164,45 @@ extern HIST_ENTRY *next_history PARAMS((
+    current_history () is the history entry, and the value of this function
+    is the offset in the line of that history entry that the string was
+    found in.  Otherwise, nothing is changed, and a -1 is returned. */
+-extern int history_search PARAMS((const char *, int));
++READLINE_DLL_IMPEXP int history_search PARAMS((const char *, int));
+ 
+ /* Search the history for STRING, starting at history_offset.
+    The search is anchored: matching lines must begin with string.
+    DIRECTION is as in history_search(). */
+-extern int history_search_prefix PARAMS((const char *, int));
++READLINE_DLL_IMPEXP int history_search_prefix PARAMS((const char *, int));
+ 
+ /* Search for STRING in the history list, starting at POS, an
+    absolute index into the list.  DIR, if negative, says to search
+    backwards from POS, else forwards.
+    Returns the absolute index of the history element where STRING
+    was found, or -1 otherwise. */
+-extern int history_search_pos PARAMS((const char *, int, int));
++READLINE_DLL_IMPEXP int history_search_pos PARAMS((const char *, int, int));
+ 
+ /* Managing the history file. */
+ 
+ /* Add the contents of FILENAME to the history list, a line at a time.
+    If FILENAME is NULL, then read from ~/.history.  Returns 0 if
+    successful, or errno if not. */
+-extern int read_history PARAMS((const char *));
++READLINE_DLL_IMPEXP int read_history PARAMS((const char *));
+ 
+ /* Read a range of lines from FILENAME, adding them to the history list.
+    Start reading at the FROM'th line and end at the TO'th.  If FROM
+    is zero, start at the beginning.  If TO is less than FROM, read
+    until the end of the file.  If FILENAME is NULL, then read from
+    ~/.history.  Returns 0 if successful, or errno if not. */
+-extern int read_history_range PARAMS((const char *, int, int));
++READLINE_DLL_IMPEXP int read_history_range PARAMS((const char *, int, int));
+ 
+ /* Write the current history to FILENAME.  If FILENAME is NULL,
+    then write the history list to ~/.history.  Values returned
+    are as in read_history ().  */
+-extern int write_history PARAMS((const char *));
++READLINE_DLL_IMPEXP int write_history PARAMS((const char *));
+ 
+ /* Append NELEMENT entries to FILENAME.  The entries appended are from
+    the end of the list minus NELEMENTs up to the end of the list. */
+-extern int append_history PARAMS((int, const char *));
++READLINE_DLL_IMPEXP int append_history PARAMS((int, const char *));
+ 
+ /* Truncate the history file, leaving only the last NLINES lines. */
+-extern int history_truncate_file PARAMS((const char *, int));
++READLINE_DLL_IMPEXP int history_truncate_file PARAMS((const char *, int));
+ 
+ /* History expansion. */
+ 
+@@ -218,12 +218,12 @@ extern int history_truncate_file PARAMS(
+ 
+   If an error ocurred in expansion, then OUTPUT contains a descriptive
+   error message. */
+-extern int history_expand PARAMS((char *, char **));
++READLINE_DLL_IMPEXP int history_expand PARAMS((char *, char **));
+ 
+ /* Extract a string segment consisting of the FIRST through LAST
+    arguments present in STRING.  Arguments are broken up as in
+    the shell. */
+-extern char *history_arg_extract PARAMS((int, int, const char *));
++READLINE_DLL_IMPEXP char *history_arg_extract PARAMS((int, int, const char *));
+ 
+ /* Return the text of the history event beginning at the current
+    offset into STRING.  Pass STRING with *INDEX equal to the
+@@ -231,33 +231,33 @@ extern char *history_arg_extract PARAMS(
+    DELIMITING_QUOTE is a character that is allowed to end the string
+    specification for what to search for in addition to the normal
+    characters `:', ` ', `\t', `\n', and sometimes `?'. */
+-extern char *get_history_event PARAMS((const char *, int *, int));
++READLINE_DLL_IMPEXP char *get_history_event PARAMS((const char *, int *, int));
+ 
+ /* Return an array of tokens, much as the shell might.  The tokens are
+    parsed out of STRING. */
+-extern char **history_tokenize PARAMS((const char *));
++READLINE_DLL_IMPEXP char **history_tokenize PARAMS((const char *));
+ 
+ /* Exported history variables. */
+-extern int history_base;
+-extern int history_length;
+-extern int history_max_entries;
+-extern char history_expansion_char;
+-extern char history_subst_char;
+-extern char *history_word_delimiters;
+-extern char history_comment_char;
+-extern char *history_no_expand_chars;
+-extern char *history_search_delimiter_chars;
+-extern int history_quotes_inhibit_expansion;
++READLINE_DLL_IMPEXP int history_base;
++READLINE_DLL_IMPEXP int history_length;
++READLINE_DLL_IMPEXP int history_max_entries;
++READLINE_DLL_IMPEXP char history_expansion_char;
++READLINE_DLL_IMPEXP char history_subst_char;
++READLINE_DLL_IMPEXP char *history_word_delimiters;
++READLINE_DLL_IMPEXP char history_comment_char;
++READLINE_DLL_IMPEXP char *history_no_expand_chars;
++READLINE_DLL_IMPEXP char *history_search_delimiter_chars;
++READLINE_DLL_IMPEXP int history_quotes_inhibit_expansion;
+ 
+-extern int history_write_timestamps;
++READLINE_DLL_IMPEXP int history_write_timestamps;
+ 
+ /* Backwards compatibility */
+-extern int max_input_history;
++READLINE_DLL_IMPEXP int max_input_history;
+ 
+ /* If set, this function is called to decide whether or not a particular
+    history expansion should be treated as a special case for the calling
+    application and not expanded. */
+-extern rl_linebuf_func_t *history_inhibit_expansion_function;
++READLINE_DLL_IMPEXP rl_linebuf_func_t *history_inhibit_expansion_function;
+ 
+ #ifdef __cplusplus
+ }
+diff -ipuwr readline-5.2-orig/input.c readline-5.2-src/input.c
+--- readline-5.2-orig/input.c	2006-08-16 22:15:16.000000000 +0200
++++ readline-5.2-src/input.c	2006-11-12 11:37:43.453125000 +0100
+@@ -164,6 +164,7 @@ _rl_pushed_input_available ()
+   return (push_index != pop_index);
+ }
+ 
++#ifndef _WIN32
+ /* If a character is available to be read, then read it and stuff it into
+    IBUFFER.  Otherwise, just return.  Returns number of characters read
+    (0 if none available) and -1 on error (EIO). */
+@@ -263,6 +264,7 @@ rl_gather_tyi ()
+ 
+   return 1;
+ }
++#endif /* !_WIN32 */
+ 
+ int
+ rl_set_keyboard_input_timeout (u)
+@@ -276,6 +278,7 @@ rl_set_keyboard_input_timeout (u)
+   return (o);
+ }
+ 
++#ifndef _WIN32
+ /* Is there input available to be read on the readline input file
+    descriptor?  Only works if the system has select(2) or FIONREAD.
+    Uses the value of _keyboard_input_timeout as the timeout; if another
+@@ -320,6 +323,7 @@ _rl_input_available ()
+ 
+   return 0;
+ }
++#endif /* !_WIN32 */
+ 
+ int
+ _rl_input_queued (t)
+@@ -448,6 +452,7 @@ rl_read_key ()
+   return (c);
+ }
+ 
++#ifndef _WIN32
+ int
+ rl_getc (stream)
+      FILE *stream;
+@@ -506,6 +511,222 @@ rl_getc (stream)
+     }
+ }
+ 
++#else /* _WIN32 */
++
++#include <windows.h>
++#include <ctype.h>
++#include <conio.h>
++#include <io.h>
++
++#define EXT_PREFIX 0x1f8
++
++#define KEV	   irec.Event.KeyEvent			/* to make life easier  */
++#define KST	   irec.Event.KeyEvent.dwControlKeyState
++
++static int pending_key = 0;
++static int pending_count = 0;
++static int pending_prefix = 0;
++
++extern int _rl_last_c_pos;	/* imported from display.c  */
++extern int _rl_last_v_pos;
++extern int rl_dispatching;	/* imported from readline.c  */
++extern int rl_point;
++extern int rl_done;
++extern int rl_visible_prompt_length;
++extern int _rl_screenwidth;		/* imported from terminal.c  */
++
++extern int haveConsole;		/* imported from rltty.c  */
++extern HANDLE hStdout, hStdin;
++extern COORD rlScreenOrigin, rlScreenEnd;
++extern int rlScreenStart, rlScreenMax;
++static void MouseEventProc(MOUSE_EVENT_RECORD kev);
++
++int rl_getc (stream)
++     FILE *stream;
++{
++  if ( pending_count )
++    {
++      --pending_count;
++      if ( pending_prefix && (pending_count & 1) )
++        return pending_prefix;
++      else
++        return pending_key;
++    }
++
++  while ( 1 )
++    {
++      DWORD dummy;
++
++      if (WaitForSingleObject(hStdin, WAIT_FOR_INPUT) != WAIT_OBJECT_0)
++        {
++          if ( rl_done )
++            return( 0 );
++          else
++            continue;
++        }
++      if ( haveConsole & FOR_INPUT )
++        {
++          INPUT_RECORD irec;
++          ReadConsoleInput (hStdin, &irec, 1, &dummy);
++          switch(irec.EventType)
++            {
++            case KEY_EVENT:
++              if (KEV.bKeyDown &&
++                  ((KEV.wVirtualKeyCode < VK_SHIFT) ||
++                   (KEV.wVirtualKeyCode > VK_MENU)))
++                {
++                  pending_count = KEV.wRepeatCount;
++                  pending_prefix = 0;
++                  pending_key = KEV.uChar.AsciiChar & 0xff;
++
++                  if (KST & ENHANCED_KEY)
++                    {
++#define CTRL_TO_ASCII(c) ((c) - 'a' + 1)
++                      switch (KEV.wVirtualKeyCode)
++                        {
++                          case VK_HOME:
++                            pending_key = CTRL_TO_ASCII ('a');
++                            break;
++                          case VK_END:
++                            pending_key = CTRL_TO_ASCII ('e');
++                            break;
++                          case VK_LEFT:
++                            pending_key = CTRL_TO_ASCII ('b');
++                            break;
++                          case VK_RIGHT:
++                            pending_key = CTRL_TO_ASCII ('f');
++                            break;
++                          case VK_UP:
++                            pending_key = CTRL_TO_ASCII ('p');
++                            break;
++                          case VK_DOWN:
++                            pending_key = CTRL_TO_ASCII ('n');
++                            break;
++                          case VK_DELETE:
++                            pending_key = CTRL_TO_ASCII ('d');
++                            break;
++                        }
++                    }
++                  
++                  if (KST & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED))
++                    pending_prefix = VK_ESCAPE;
++
++                  if (pending_prefix)
++                      pending_count = (pending_count << 1) - 1;
++               
++                  /* Ascii direct */
++                  if (pending_key)
++                      pending_count--;
++
++                  if (pending_prefix)
++                    return pending_prefix;
++                  return pending_key;
++                }
++              break;
++            case MOUSE_EVENT:
++              if ( (haveConsole & FOR_OUTPUT) && !rl_dispatching )
++                MouseEventProc(irec.Event.MouseEvent);
++            default:
++              break;
++            }
++        }
++      else
++        {
++          int key;
++          ReadFile(hStdin, &key, 1, &dummy, NULL);
++          return key;
++        }
++    }
++}
++
++void MouseEventProc(MOUSE_EVENT_RECORD mev)
++{
++  static DWORD lastButtonState, cstat_flags;
++  static COORD lastButtonPos, src_down_pos;
++
++#define RLPOS_CHANGED	1
++#define SELECT_START	2
++  
++  switch (mev.dwEventFlags )
++    {
++    case 0 :			/* change in button state  */
++
++      /* Cursor setting: 
++	 LEFT_BUTTON_PRESSED sets cursor anywhere on the screen,
++	 thereafter, any change in button state will clipp the cursor
++	 position to the readline range if there has been no cursor
++	 movement. Otherwhise the cursor is reset to its old position.
++      */
++      if (mev.dwButtonState == FROM_LEFT_1ST_BUTTON_PRESSED)
++        {
++          if (lastButtonState == 0)
++            {
++              src_down_pos = mev.dwMousePosition;
++              cstat_flags |= RLPOS_CHANGED | SELECT_START;
++              SetConsoleCursorPosition(hStdout, mev.dwMousePosition);
++            }
++        }
++      else
++        {
++          if (cstat_flags & RLPOS_CHANGED)
++            {
++              if ( (mev.dwMousePosition.X == src_down_pos.X)
++		   && (mev.dwMousePosition.Y == src_down_pos.Y) )
++                {
++                  int linear_pos = (int)mev.dwMousePosition.Y * _rl_screenwidth
++		    + (int)mev.dwMousePosition.X;
++                  if (linear_pos < rlScreenStart + rl_visible_prompt_length)
++                    {
++                      linear_pos = rlScreenStart + rl_visible_prompt_length;
++                      mev.dwMousePosition.X = rlScreenOrigin.X + rl_visible_prompt_length;
++                      mev.dwMousePosition.Y = rlScreenOrigin.Y;
++                    }
++                  if (linear_pos > rlScreenMax)
++                    {
++                      linear_pos = rlScreenMax;
++                      mev.dwMousePosition = rlScreenEnd;
++                    }
++                  rl_point = linear_pos - rlScreenStart - rl_visible_prompt_length;
++                  _rl_last_c_pos = mev.dwMousePosition.X - rlScreenOrigin.X;
++                  _rl_last_v_pos = mev.dwMousePosition.Y - rlScreenOrigin.Y;
++                }
++              else
++                {
++                  mev.dwMousePosition.X = rlScreenOrigin.X + _rl_last_c_pos;
++                  mev.dwMousePosition.Y = rlScreenOrigin.Y + _rl_last_v_pos;
++                }
++              SetConsoleCursorPosition(hStdout, mev.dwMousePosition);
++              cstat_flags &= !RLPOS_CHANGED;
++            }
++        }
++      lastButtonState = mev.dwButtonState;
++      lastButtonPos = mev.dwMousePosition;
++      break;
++    case MOUSE_MOVED:		/* the most frequent event */
++    default:      
++      break;
++    }
++}
++
++int _rl_input_available ()
++{
++  if (isatty (fileno (rl_instream)))
++    return (kbhit());
++  return 0;
++}
++
++static int rl_gather_tyi ()
++{
++  int count = 0;
++  while (isatty (fileno (rl_instream)) && kbhit () && ibuffer_space ())
++    {
++      rl_stuff_char ((*rl_getc_function) (rl_instream));
++      count++;
++    }
++  return count;
++}
++#endif /* _WIN32 */
++
+ #if defined (HANDLE_MULTIBYTE)
+ /* read multibyte char */
+ int
+diff -ipuwr readline-5.2-orig/keymaps.h readline-5.2-src/keymaps.h
+--- readline-5.2-orig/keymaps.h	2001-11-20 18:42:50.000000000 +0100
++++ readline-5.2-src/keymaps.h	2006-11-12 11:37:43.453125000 +0100
+@@ -66,35 +66,35 @@ typedef KEYMAP_ENTRY *Keymap;
+ #define ISKMAP 1
+ #define ISMACR 2
+ 
+-extern KEYMAP_ENTRY_ARRAY emacs_standard_keymap, emacs_meta_keymap, emacs_ctlx_keymap;
+-extern KEYMAP_ENTRY_ARRAY vi_insertion_keymap, vi_movement_keymap;
++READLINE_DLL_IMPEXP KEYMAP_ENTRY_ARRAY emacs_standard_keymap, emacs_meta_keymap, emacs_ctlx_keymap;
++READLINE_DLL_IMPEXP KEYMAP_ENTRY_ARRAY vi_insertion_keymap, vi_movement_keymap;
+ 
+ /* Return a new, empty keymap.
+    Free it with free() when you are done. */
+-extern Keymap rl_make_bare_keymap PARAMS((void));
++READLINE_DLL_IMPEXP Keymap rl_make_bare_keymap PARAMS((void));
+ 
+ /* Return a new keymap which is a copy of MAP. */
+-extern Keymap rl_copy_keymap PARAMS((Keymap));
++READLINE_DLL_IMPEXP Keymap rl_copy_keymap PARAMS((Keymap));
+ 
+ /* Return a new keymap with the printing characters bound to rl_insert,
+    the lowercase Meta characters bound to run their equivalents, and
+    the Meta digits bound to produce numeric arguments. */
+-extern Keymap rl_make_keymap PARAMS((void));
++READLINE_DLL_IMPEXP Keymap rl_make_keymap PARAMS((void));
+ 
+ /* Free the storage associated with a keymap. */
+-extern void rl_discard_keymap PARAMS((Keymap));
++READLINE_DLL_IMPEXP void rl_discard_keymap PARAMS((Keymap));
+ 
+ /* These functions actually appear in bind.c */
+ 
+ /* Return the keymap corresponding to a given name.  Names look like
+    `emacs' or `emacs-meta' or `vi-insert'.  */
+-extern Keymap rl_get_keymap_by_name PARAMS((const char *));
++READLINE_DLL_IMPEXP Keymap rl_get_keymap_by_name PARAMS((const char *));
+ 
+ /* Return the current keymap. */
+-extern Keymap rl_get_keymap PARAMS((void));
++READLINE_DLL_IMPEXP Keymap rl_get_keymap PARAMS((void));
+ 
+ /* Set the current keymap to MAP. */
+-extern void rl_set_keymap PARAMS((Keymap));
++READLINE_DLL_IMPEXP void rl_set_keymap PARAMS((Keymap));
+ 
+ #ifdef __cplusplus
+ }
+diff -ipuwr readline-5.2-orig/kill.c readline-5.2-src/kill.c
+--- readline-5.2-orig/kill.c	2006-06-30 03:53:18.000000000 +0200
++++ readline-5.2-src/kill.c	2006-11-12 11:37:43.468750000 +0100
+@@ -657,7 +657,7 @@ rl_yank_last_arg (count, key)
+ }
+ 
+ /* A special paste command for users of Cygnus's cygwin32. */
+-#if defined (__CYGWIN__)
++#if defined (__CYGWIN__) || defined (_WIN32)
+ #include <windows.h>
+ 
+ int
+diff -ipuwr readline-5.2-orig/nls.c readline-5.2-src/nls.c
+--- readline-5.2-orig/nls.c	2002-10-19 05:05:50.000000000 +0200
++++ readline-5.2-src/nls.c	2006-11-12 11:37:43.468750000 +0100
+@@ -116,6 +116,7 @@ _rl_init_eightbit ()
+     lspec = "";
+   t = setlocale (LC_CTYPE, lspec);
+ 
++#ifndef _WIN32
+   if (t && *t && (t[0] != 'C' || t[1]) && (STREQ (t, "POSIX") == 0))
+     {
+       _rl_meta_flag = 1;
+@@ -124,6 +125,7 @@ _rl_init_eightbit ()
+       return (1);
+     }
+   else
++#endif
+     return (0);
+ 
+ #else /* !HAVE_SETLOCALE */
+diff -ipuwr readline-5.2-orig/parens.c readline-5.2-src/parens.c
+--- readline-5.2-orig/parens.c	2004-03-04 04:39:52.000000000 +0100
++++ readline-5.2-src/parens.c	2006-11-12 11:37:43.468750000 +0100
+@@ -42,6 +42,10 @@
+ #  define HAVE_SELECT
+ #endif
+ 
++#ifdef _WIN32
++# include <windows.h>
++#endif
++
+ #if defined (HAVE_SELECT)
+ #  include <sys/time.h>
+ #endif /* HAVE_SELECT */
+@@ -66,7 +70,7 @@ static int find_matching_open PARAMS((ch
+ 
+ /* Non-zero means try to blink the matching open parenthesis when the
+    close parenthesis is inserted. */
+-#if defined (HAVE_SELECT)
++#if defined (HAVE_SELECT) || defined (_WIN32)
+ int rl_blink_matching_paren = 1;
+ #else /* !HAVE_SELECT */
+ int rl_blink_matching_paren = 0;
+@@ -138,8 +142,25 @@ rl_insert_close (count, invoking_key)
+       (*rl_redisplay_function) ();
+       ready = select (1, &readfds, (fd_set *)NULL, (fd_set *)NULL, &timer);
+       rl_point = orig_point;
+-#else /* !HAVE_SELECT */
+-      _rl_insert_char (count, invoking_key);
++#elif defined (_WIN32)
++      int orig_point, match_point, ready;
++
++      rl_insert (1, invoking_key);
++      (*rl_redisplay_function) ();
++      match_point =
++	find_matching_open (rl_line_buffer, rl_point - 2, invoking_key);
++
++      /* Emacs might message or ring the bell here, but I don't. */
++      if (match_point < 0)
++	return -1;
++
++      orig_point = rl_point;
++      rl_point = match_point;
++      (*rl_redisplay_function) ();
++      ready = (WaitForSingleObject (GetStdHandle(STD_INPUT_HANDLE), 500) == WAIT_OBJECT_0);
++      rl_point = orig_point;
++#else /* !_WIN32 */
++      rl_insert (count, invoking_key);
+ #endif /* !HAVE_SELECT */
+     }
+   return 0;
+diff -ipuwr readline-5.2-orig/posixdir.h readline-5.2-src/posixdir.h
+--- readline-5.2-orig/posixdir.h	2004-03-22 22:00:44.000000000 +0100
++++ readline-5.2-src/posixdir.h	2006-11-12 11:37:43.468750000 +0100
+@@ -23,6 +23,7 @@
+ #if !defined (_POSIXDIR_H_)
+ #define _POSIXDIR_H_
+ 
++#if !defined (_WIN32)
+ #if defined (HAVE_DIRENT_H)
+ #  include <dirent.h>
+ #  if defined (HAVE_STRUCT_DIRENT_D_NAMLEN)
+@@ -30,6 +31,7 @@
+ #  else
+ #    define D_NAMLEN(d)   (strlen ((d)->d_name))
+ #  endif /* !HAVE_STRUCT_DIRENT_D_NAMLEN */
++#    define FILENAME(d)   ((d)->d_name)
+ #else
+ #  if defined (HAVE_SYS_NDIR_H)
+ #    include <sys/ndir.h>
+@@ -44,7 +46,15 @@
+ #    define dirent direct
+ #  endif /* !dirent */
+ #  define D_NAMLEN(d)   ((d)->d_namlen)
++#    define FILENAME(d)   ((d)->d_name)
+ #endif /* !HAVE_DIRENT_H */
++#else
++#  undef FILENAME
++#  define FILENAME(d) (d).cFileName
++#  define closedir(dir) FindClose (dir)
++#  undef D_NAMLEN
++#  define D_NAMLEN(d) strlen (d.cFileName)
++#endif /* _WIN32 */
+ 
+ #if defined (HAVE_STRUCT_DIRENT_D_INO) && !defined (HAVE_STRUCT_DIRENT_D_FILENO)
+ #  define d_fileno d_ino
+diff -ipuwr readline-5.2-orig/readline.c readline-5.2-src/readline.c
+--- readline-5.2-orig/readline.c	2006-08-16 22:00:36.000000000 +0200
++++ readline-5.2-src/readline.c	2006-11-12 13:44:38.000000000 +0100
+@@ -1174,8 +1174,9 @@ rl_save_state (sp)
+   sp->macro = rl_executing_macro;
+ 
+   sp->catchsigs = rl_catch_signals;
++#ifdef SIGWINCH
+   sp->catchsigwinch = rl_catch_sigwinch;
+-
++#endif /* SIGWINCH */
+   return (0);
+ }
+ 
+@@ -1208,7 +1209,22 @@ rl_restore_state (sp)
+   rl_executing_macro = sp->macro;
+ 
+   rl_catch_signals = sp->catchsigs;
++#ifdef SIGWINCH
+   rl_catch_sigwinch = sp->catchsigwinch;
++#endif /* SIGWINCH */
+ 
+   return (0);
+ }
++
++/* Free the buffer returned by readline(), the buffer passed as the
++   parameter to lhandler function installed by rl_callback_handler_install()
++   and buffers allocated by readline library functions.
++   Use this funtion instead of free().
++   This function MUST be used instead free() if readline is linked as
++   DLL on WIN32 */
++void
++rl_free (buff)
++     void *buff;
++{
++  free(buff);
++}
+diff -ipuwr readline-5.2-orig/readline.h readline-5.2-src/readline.h
+--- readline-5.2-orig/readline.h	2006-08-16 22:17:00.000000000 +0200
++++ readline-5.2-src/readline.h	2006-11-12 13:45:30.328125000 +0100
+@@ -63,7 +63,7 @@ typedef struct undo_list {
+ } UNDO_LIST;
+ 
+ /* The current undo list for RL_LINE_BUFFER. */
+-extern UNDO_LIST *rl_undo_list;
++READLINE_DLL_IMPEXP UNDO_LIST *rl_undo_list;
+ 
+ /* The data structure for mapping textual names to code addresses. */
+ typedef struct _funmap {
+@@ -71,7 +71,7 @@ typedef struct _funmap {
+   rl_command_func_t *function;
+ } FUNMAP;
+ 
+-extern FUNMAP **funmap;
++READLINE_DLL_IMPEXP FUNMAP **funmap;
+ 
+ /* **************************************************************** */
+ /*								    */
+@@ -80,195 +80,202 @@ extern FUNMAP **funmap;
+ /* **************************************************************** */
+ 
+ /* Bindable commands for numeric arguments. */
+-extern int rl_digit_argument PARAMS((int, int));
+-extern int rl_universal_argument PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_digit_argument PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_universal_argument PARAMS((int, int));
+ 
+ /* Bindable commands for moving the cursor. */
+-extern int rl_forward_byte PARAMS((int, int));
+-extern int rl_forward_char PARAMS((int, int));
+-extern int rl_forward PARAMS((int, int));
+-extern int rl_backward_byte PARAMS((int, int));
+-extern int rl_backward_char PARAMS((int, int));
+-extern int rl_backward PARAMS((int, int));
+-extern int rl_beg_of_line PARAMS((int, int));
+-extern int rl_end_of_line PARAMS((int, int));
+-extern int rl_forward_word PARAMS((int, int));
+-extern int rl_backward_word PARAMS((int, int));
+-extern int rl_refresh_line PARAMS((int, int));
+-extern int rl_clear_screen PARAMS((int, int));
+-extern int rl_arrow_keys PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_forward_byte PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_forward_char PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_forward PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_backward_byte PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_backward_char PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_backward PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_beg_of_line PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_end_of_line PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_forward_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_backward_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_refresh_line PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_clear_screen PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_arrow_keys PARAMS((int, int));
+ 
+ /* Bindable commands for inserting and deleting text. */
+-extern int rl_insert PARAMS((int, int));
+-extern int rl_quoted_insert PARAMS((int, int));
+-extern int rl_tab_insert PARAMS((int, int));
+-extern int rl_newline PARAMS((int, int));
+-extern int rl_do_lowercase_version PARAMS((int, int));
+-extern int rl_rubout PARAMS((int, int));
+-extern int rl_delete PARAMS((int, int));
+-extern int rl_rubout_or_delete PARAMS((int, int));
+-extern int rl_delete_horizontal_space PARAMS((int, int));
+-extern int rl_delete_or_show_completions PARAMS((int, int));
+-extern int rl_insert_comment PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_insert PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_quoted_insert PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_tab_insert PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_newline PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_do_lowercase_version PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_rubout PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_delete PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_rubout_or_delete PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_delete_horizontal_space PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_delete_or_show_completions PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_insert_comment PARAMS((int, int));
+ 
+ /* Bindable commands for changing case. */
+-extern int rl_upcase_word PARAMS((int, int));
+-extern int rl_downcase_word PARAMS((int, int));
+-extern int rl_capitalize_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_upcase_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_downcase_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_capitalize_word PARAMS((int, int));
+ 
+ /* Bindable commands for transposing characters and words. */
+-extern int rl_transpose_words PARAMS((int, int));
+-extern int rl_transpose_chars PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_transpose_words PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_transpose_chars PARAMS((int, int));
+ 
+ /* Bindable commands for searching within a line. */
+-extern int rl_char_search PARAMS((int, int));
+-extern int rl_backward_char_search PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_char_search PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_backward_char_search PARAMS((int, int));
+ 
+ /* Bindable commands for readline's interface to the command history. */
+-extern int rl_beginning_of_history PARAMS((int, int));
+-extern int rl_end_of_history PARAMS((int, int));
+-extern int rl_get_next_history PARAMS((int, int));
+-extern int rl_get_previous_history PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_beginning_of_history PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_end_of_history PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_get_next_history PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_get_previous_history PARAMS((int, int));
+ 
+ /* Bindable commands for managing the mark and region. */
+-extern int rl_set_mark PARAMS((int, int));
+-extern int rl_exchange_point_and_mark PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_set_mark PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_exchange_point_and_mark PARAMS((int, int));
+ 
+ /* Bindable commands to set the editing mode (emacs or vi). */
+-extern int rl_vi_editing_mode PARAMS((int, int));
+-extern int rl_emacs_editing_mode PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_editing_mode PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_emacs_editing_mode PARAMS((int, int));
+ 
+ /* Bindable commands to change the insert mode (insert or overwrite) */
+-extern int rl_overwrite_mode PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_overwrite_mode PARAMS((int, int));
+ 
+ /* Bindable commands for managing key bindings. */
+-extern int rl_re_read_init_file PARAMS((int, int));
+-extern int rl_dump_functions PARAMS((int, int));
+-extern int rl_dump_macros PARAMS((int, int));
+-extern int rl_dump_variables PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_re_read_init_file PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_dump_functions PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_dump_macros PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_dump_variables PARAMS((int, int));
+ 
+ /* Bindable commands for word completion. */
+-extern int rl_complete PARAMS((int, int));
+-extern int rl_possible_completions PARAMS((int, int));
+-extern int rl_insert_completions PARAMS((int, int));
+-extern int rl_menu_complete PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_complete PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_possible_completions PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_insert_completions PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_menu_complete PARAMS((int, int));
+ 
+ /* Bindable commands for killing and yanking text, and managing the kill ring. */
+-extern int rl_kill_word PARAMS((int, int));
+-extern int rl_backward_kill_word PARAMS((int, int));
+-extern int rl_kill_line PARAMS((int, int));
+-extern int rl_backward_kill_line PARAMS((int, int));
+-extern int rl_kill_full_line PARAMS((int, int));
+-extern int rl_unix_word_rubout PARAMS((int, int));
+-extern int rl_unix_filename_rubout PARAMS((int, int));
+-extern int rl_unix_line_discard PARAMS((int, int));
+-extern int rl_copy_region_to_kill PARAMS((int, int));
+-extern int rl_kill_region PARAMS((int, int));
+-extern int rl_copy_forward_word PARAMS((int, int));
+-extern int rl_copy_backward_word PARAMS((int, int));
+-extern int rl_yank PARAMS((int, int));
+-extern int rl_yank_pop PARAMS((int, int));
+-extern int rl_yank_nth_arg PARAMS((int, int));
+-extern int rl_yank_last_arg PARAMS((int, int));
+-/* Not available unless __CYGWIN__ is defined. */
+-#ifdef __CYGWIN__
+-extern int rl_paste_from_clipboard PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_kill_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_backward_kill_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_kill_line PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_backward_kill_line PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_kill_full_line PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_unix_word_rubout PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_unix_filename_rubout PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_unix_line_discard PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_copy_region_to_kill PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_kill_region PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_copy_forward_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_copy_backward_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_yank PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_yank_pop PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_yank_nth_arg PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_yank_last_arg PARAMS((int, int));
++/* Not available unless __CYGWIN__ or _WIN32 is defined. */
++#if defined (__CYGWIN__) || defined (_WIN32)
++READLINE_DLL_IMPEXP int rl_paste_from_clipboard PARAMS((int, int));
+ #endif
+ 
+ /* Bindable commands for incremental searching. */
+-extern int rl_reverse_search_history PARAMS((int, int));
+-extern int rl_forward_search_history PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_reverse_search_history PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_forward_search_history PARAMS((int, int));
+ 
+ /* Bindable keyboard macro commands. */
+-extern int rl_start_kbd_macro PARAMS((int, int));
+-extern int rl_end_kbd_macro PARAMS((int, int));
+-extern int rl_call_last_kbd_macro PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_start_kbd_macro PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_end_kbd_macro PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_call_last_kbd_macro PARAMS((int, int));
+ 
+ /* Bindable undo commands. */
+-extern int rl_revert_line PARAMS((int, int));
+-extern int rl_undo_command PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_revert_line PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_undo_command PARAMS((int, int));
+ 
+ /* Bindable tilde expansion commands. */
+-extern int rl_tilde_expand PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_tilde_expand PARAMS((int, int));
+ 
+ /* Bindable terminal control commands. */
+-extern int rl_restart_output PARAMS((int, int));
+-extern int rl_stop_output PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_restart_output PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_stop_output PARAMS((int, int));
+ 
+ /* Miscellaneous bindable commands. */
+-extern int rl_abort PARAMS((int, int));
+-extern int rl_tty_status PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_abort PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_tty_status PARAMS((int, int));
+ 
+ /* Bindable commands for incremental and non-incremental history searching. */
+-extern int rl_history_search_forward PARAMS((int, int));
+-extern int rl_history_search_backward PARAMS((int, int));
+-extern int rl_noninc_forward_search PARAMS((int, int));
+-extern int rl_noninc_reverse_search PARAMS((int, int));
+-extern int rl_noninc_forward_search_again PARAMS((int, int));
+-extern int rl_noninc_reverse_search_again PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_history_search_forward PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_history_search_backward PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_noninc_forward_search PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_noninc_reverse_search PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_noninc_forward_search_again PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_noninc_reverse_search_again PARAMS((int, int));
+ 
+ /* Bindable command used when inserting a matching close character. */
+-extern int rl_insert_close PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_insert_close PARAMS((int, int));
+ 
+ /* Not available unless READLINE_CALLBACKS is defined. */
+-extern void rl_callback_handler_install PARAMS((const char *, rl_vcpfunc_t *));
+-extern void rl_callback_read_char PARAMS((void));
+-extern void rl_callback_handler_remove PARAMS((void));
++READLINE_DLL_IMPEXP void rl_callback_handler_install PARAMS((const char *, rl_vcpfunc_t *));
++READLINE_DLL_IMPEXP void rl_callback_read_char PARAMS((void));
++READLINE_DLL_IMPEXP void rl_callback_handler_remove PARAMS((void));
+ 
+ /* Things for vi mode. Not available unless readline is compiled -DVI_MODE. */
+ /* VI-mode bindable commands. */
+-extern int rl_vi_redo PARAMS((int, int));
+-extern int rl_vi_undo PARAMS((int, int));
+-extern int rl_vi_yank_arg PARAMS((int, int));
+-extern int rl_vi_fetch_history PARAMS((int, int));
+-extern int rl_vi_search_again PARAMS((int, int));
+-extern int rl_vi_search PARAMS((int, int));
+-extern int rl_vi_complete PARAMS((int, int));
+-extern int rl_vi_tilde_expand PARAMS((int, int));
+-extern int rl_vi_prev_word PARAMS((int, int));
+-extern int rl_vi_next_word PARAMS((int, int));
+-extern int rl_vi_end_word PARAMS((int, int));
+-extern int rl_vi_insert_beg PARAMS((int, int));
+-extern int rl_vi_append_mode PARAMS((int, int));
+-extern int rl_vi_append_eol PARAMS((int, int));
+-extern int rl_vi_eof_maybe PARAMS((int, int));
+-extern int rl_vi_insertion_mode PARAMS((int, int));
+-extern int rl_vi_movement_mode PARAMS((int, int));
+-extern int rl_vi_arg_digit PARAMS((int, int));
+-extern int rl_vi_change_case PARAMS((int, int));
+-extern int rl_vi_put PARAMS((int, int));
+-extern int rl_vi_column PARAMS((int, int));
+-extern int rl_vi_delete_to PARAMS((int, int));
+-extern int rl_vi_change_to PARAMS((int, int));
+-extern int rl_vi_yank_to PARAMS((int, int));
+-extern int rl_vi_rubout PARAMS((int, int));
+-extern int rl_vi_delete PARAMS((int, int));
+-extern int rl_vi_back_to_indent PARAMS((int, int));
+-extern int rl_vi_first_print PARAMS((int, int));
+-extern int rl_vi_char_search PARAMS((int, int));
+-extern int rl_vi_match PARAMS((int, int));
+-extern int rl_vi_change_char PARAMS((int, int));
+-extern int rl_vi_subst PARAMS((int, int));
+-extern int rl_vi_overstrike PARAMS((int, int));
+-extern int rl_vi_overstrike_delete PARAMS((int, int));
+-extern int rl_vi_replace PARAMS((int, int));
+-extern int rl_vi_set_mark PARAMS((int, int));
+-extern int rl_vi_goto_mark PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_redo PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_undo PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_yank_arg PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_fetch_history PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_search_again PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_search PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_complete PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_tilde_expand PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_prev_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_next_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_end_word PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_insert_beg PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_append_mode PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_append_eol PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_eof_maybe PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_insertion_mode PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_movement_mode PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_arg_digit PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_change_case PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_put PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_column PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_delete_to PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_change_to PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_yank_to PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_rubout PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_delete PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_back_to_indent PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_first_print PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_char_search PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_match PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_change_char PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_subst PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_overstrike PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_overstrike_delete PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_replace PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_set_mark PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_goto_mark PARAMS((int, int));
+ 
+ /* VI-mode utility functions. */
+-extern int rl_vi_check PARAMS((void));
+-extern int rl_vi_domove PARAMS((int, int *));
+-extern int rl_vi_bracktype PARAMS((int));
++READLINE_DLL_IMPEXP int rl_vi_check PARAMS((void));
++READLINE_DLL_IMPEXP int rl_vi_domove PARAMS((int, int *));
++READLINE_DLL_IMPEXP int rl_vi_bracktype PARAMS((int));
+ 
+-extern void rl_vi_start_inserting PARAMS((int, int, int));
++READLINE_DLL_IMPEXP void rl_vi_start_inserting PARAMS((int, int, int));
+ 
+ /* VI-mode pseudo-bindable commands, used as utility functions. */
+-extern int rl_vi_fWord PARAMS((int, int));
+-extern int rl_vi_bWord PARAMS((int, int));
+-extern int rl_vi_eWord PARAMS((int, int));
+-extern int rl_vi_fword PARAMS((int, int));
+-extern int rl_vi_bword PARAMS((int, int));
+-extern int rl_vi_eword PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_fWord PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_bWord PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_eWord PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_fword PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_bword PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_vi_eword PARAMS((int, int));
++
++/* Free the buffer returned by readline() or passes as the parameter
++   to lhandler function saved by rl_callback_handler_install().
++   Use this funtion instead of free().
++   This function MUST be used instead free() if readline is linked as
++   DLL on WIN32 */
++READLINE_DLL_IMPEXP void rl_free PARAMS((void *));
+ 
+ /* **************************************************************** */
+ /*								    */
+@@ -278,187 +285,194 @@ extern int rl_vi_eword PARAMS((int, int)
+ 
+ /* Readline functions. */
+ /* Read a line of input.  Prompt with PROMPT.  A NULL PROMPT means none. */
+-extern char *readline PARAMS((const char *));
++READLINE_DLL_IMPEXP char *readline PARAMS((const char *));
++/* Free the buffer returned by readline(), the buffer passed as the
++   parameter to lhandler function installed by rl_callback_handler_install()
++   and buffers allocated by readline library functions.
++   Use this funtion instead of free().
++   This function MUST be used instead free() if readline is linked as
++   DLL on WIN32 */
++READLINE_DLL_IMPEXP void rl_free PARAMS((void *));
+ 
+-extern int rl_set_prompt PARAMS((const char *));
+-extern int rl_expand_prompt PARAMS((char *));
++READLINE_DLL_IMPEXP int rl_set_prompt PARAMS((const char *));
++READLINE_DLL_IMPEXP int rl_expand_prompt PARAMS((char *));
+ 
+-extern int rl_initialize PARAMS((void));
++READLINE_DLL_IMPEXP int rl_initialize PARAMS((void));
+ 
+ /* Undocumented; unused by readline */
+-extern int rl_discard_argument PARAMS((void));
++READLINE_DLL_IMPEXP int rl_discard_argument PARAMS((void));
+ 
+ /* Utility functions to bind keys to readline commands. */
+-extern int rl_add_defun PARAMS((const char *, rl_command_func_t *, int));
+-extern int rl_bind_key PARAMS((int, rl_command_func_t *));
+-extern int rl_bind_key_in_map PARAMS((int, rl_command_func_t *, Keymap));
+-extern int rl_unbind_key PARAMS((int));
+-extern int rl_unbind_key_in_map PARAMS((int, Keymap));
+-extern int rl_bind_key_if_unbound PARAMS((int, rl_command_func_t *));
+-extern int rl_bind_key_if_unbound_in_map PARAMS((int, rl_command_func_t *, Keymap));
+-extern int rl_unbind_function_in_map PARAMS((rl_command_func_t *, Keymap));
+-extern int rl_unbind_command_in_map PARAMS((const char *, Keymap));
+-extern int rl_bind_keyseq PARAMS((const char *, rl_command_func_t *));
+-extern int rl_bind_keyseq_in_map PARAMS((const char *, rl_command_func_t *, Keymap));
+-extern int rl_bind_keyseq_if_unbound PARAMS((const char *, rl_command_func_t *));
+-extern int rl_bind_keyseq_if_unbound_in_map PARAMS((const char *, rl_command_func_t *, Keymap));
+-extern int rl_generic_bind PARAMS((int, const char *, char *, Keymap));
++READLINE_DLL_IMPEXP int rl_add_defun PARAMS((const char *, rl_command_func_t *, int));
++READLINE_DLL_IMPEXP int rl_bind_key PARAMS((int, rl_command_func_t *));
++READLINE_DLL_IMPEXP int rl_bind_key_in_map PARAMS((int, rl_command_func_t *, Keymap));
++READLINE_DLL_IMPEXP int rl_unbind_key PARAMS((int));
++READLINE_DLL_IMPEXP int rl_unbind_key_in_map PARAMS((int, Keymap));
++READLINE_DLL_IMPEXP int rl_bind_key_if_unbound PARAMS((int, rl_command_func_t *));
++READLINE_DLL_IMPEXP int rl_bind_key_if_unbound_in_map PARAMS((int, rl_command_func_t *, Keymap));
++READLINE_DLL_IMPEXP int rl_unbind_function_in_map PARAMS((rl_command_func_t *, Keymap));
++READLINE_DLL_IMPEXP int rl_unbind_command_in_map PARAMS((const char *, Keymap));
++READLINE_DLL_IMPEXP int rl_bind_keyseq PARAMS((const char *, rl_command_func_t *));
++READLINE_DLL_IMPEXP int rl_bind_keyseq_in_map PARAMS((const char *, rl_command_func_t *, Keymap));
++READLINE_DLL_IMPEXP int rl_bind_keyseq_if_unbound PARAMS((const char *, rl_command_func_t *));
++READLINE_DLL_IMPEXP int rl_bind_keyseq_if_unbound_in_map PARAMS((const char *, rl_command_func_t *, Keymap));
++READLINE_DLL_IMPEXP int rl_generic_bind PARAMS((int, const char *, char *, Keymap));
+ 
+-extern char *rl_variable_value PARAMS((const char *));
+-extern int rl_variable_bind PARAMS((const char *, const char *));
++READLINE_DLL_IMPEXP char *rl_variable_value PARAMS((const char *));
++READLINE_DLL_IMPEXP int rl_variable_bind PARAMS((const char *, const char *));
+ 
+ /* Backwards compatibility, use rl_bind_keyseq_in_map instead. */
+-extern int rl_set_key PARAMS((const char *, rl_command_func_t *, Keymap));
++READLINE_DLL_IMPEXP int rl_set_key PARAMS((const char *, rl_command_func_t *, Keymap));
+ 
+ /* Backwards compatibility, use rl_generic_bind instead. */
+-extern int rl_macro_bind PARAMS((const char *, const char *, Keymap));
++READLINE_DLL_IMPEXP int rl_macro_bind PARAMS((const char *, const char *, Keymap));
+ 
+ /* Undocumented in the texinfo manual; not really useful to programs. */
+-extern int rl_translate_keyseq PARAMS((const char *, char *, int *));
+-extern char *rl_untranslate_keyseq PARAMS((int));
++READLINE_DLL_IMPEXP int rl_translate_keyseq PARAMS((const char *, char *, int *));
++READLINE_DLL_IMPEXP char *rl_untranslate_keyseq PARAMS((int));
+ 
+-extern rl_command_func_t *rl_named_function PARAMS((const char *));
+-extern rl_command_func_t *rl_function_of_keyseq PARAMS((const char *, Keymap, int *));
++READLINE_DLL_IMPEXP rl_command_func_t *rl_named_function PARAMS((const char *));
++READLINE_DLL_IMPEXP rl_command_func_t *rl_function_of_keyseq PARAMS((const char *, Keymap, int *));
+ 
+-extern void rl_list_funmap_names PARAMS((void));
+-extern char **rl_invoking_keyseqs_in_map PARAMS((rl_command_func_t *, Keymap));
+-extern char **rl_invoking_keyseqs PARAMS((rl_command_func_t *));
+- 
+-extern void rl_function_dumper PARAMS((int));
+-extern void rl_macro_dumper PARAMS((int));
+-extern void rl_variable_dumper PARAMS((int));
++READLINE_DLL_IMPEXP void rl_list_funmap_names PARAMS((void));
++READLINE_DLL_IMPEXP char **rl_invoking_keyseqs_in_map PARAMS((rl_command_func_t *, Keymap));
++READLINE_DLL_IMPEXP char **rl_invoking_keyseqs PARAMS((rl_command_func_t *));
++
++READLINE_DLL_IMPEXP void rl_function_dumper PARAMS((int));
++READLINE_DLL_IMPEXP void rl_macro_dumper PARAMS((int));
++READLINE_DLL_IMPEXP void rl_variable_dumper PARAMS((int));
+ 
+-extern int rl_read_init_file PARAMS((const char *));
+-extern int rl_parse_and_bind PARAMS((char *));
++READLINE_DLL_IMPEXP int rl_read_init_file PARAMS((const char *));
++READLINE_DLL_IMPEXP int rl_parse_and_bind PARAMS((char *));
+ 
+ /* Functions for manipulating keymaps. */
+-extern Keymap rl_make_bare_keymap PARAMS((void));
+-extern Keymap rl_copy_keymap PARAMS((Keymap));
+-extern Keymap rl_make_keymap PARAMS((void));
+-extern void rl_discard_keymap PARAMS((Keymap));
+-
+-extern Keymap rl_get_keymap_by_name PARAMS((const char *));
+-extern char *rl_get_keymap_name PARAMS((Keymap));
+-extern void rl_set_keymap PARAMS((Keymap));
+-extern Keymap rl_get_keymap PARAMS((void));
++READLINE_DLL_IMPEXP Keymap rl_make_bare_keymap PARAMS((void));
++READLINE_DLL_IMPEXP Keymap rl_copy_keymap PARAMS((Keymap));
++READLINE_DLL_IMPEXP Keymap rl_make_keymap PARAMS((void));
++READLINE_DLL_IMPEXP void rl_discard_keymap PARAMS((Keymap));
++
++READLINE_DLL_IMPEXP Keymap rl_get_keymap_by_name PARAMS((const char *));
++READLINE_DLL_IMPEXP char *rl_get_keymap_name PARAMS((Keymap));
++READLINE_DLL_IMPEXP void rl_set_keymap PARAMS((Keymap));
++READLINE_DLL_IMPEXP Keymap rl_get_keymap PARAMS((void));
+ /* Undocumented; used internally only. */
+-extern void rl_set_keymap_from_edit_mode PARAMS((void));
+-extern char *rl_get_keymap_name_from_edit_mode PARAMS((void));
++READLINE_DLL_IMPEXP void rl_set_keymap_from_edit_mode PARAMS((void));
++READLINE_DLL_IMPEXP char *rl_get_keymap_name_from_edit_mode PARAMS((void));
+ 
+ /* Functions for manipulating the funmap, which maps command names to functions. */
+-extern int rl_add_funmap_entry PARAMS((const char *, rl_command_func_t *));
+-extern const char **rl_funmap_names PARAMS((void));
++READLINE_DLL_IMPEXP int rl_add_funmap_entry PARAMS((const char *, rl_command_func_t *));
++READLINE_DLL_IMPEXP const char **rl_funmap_names PARAMS((void));
+ /* Undocumented, only used internally -- there is only one funmap, and this
+    function may be called only once. */
+-extern void rl_initialize_funmap PARAMS((void));
++READLINE_DLL_IMPEXP void rl_initialize_funmap PARAMS((void));
+ 
+ /* Utility functions for managing keyboard macros. */
+-extern void rl_push_macro_input PARAMS((char *));
++READLINE_DLL_IMPEXP void rl_push_macro_input PARAMS((char *));
+ 
+ /* Functions for undoing, from undo.c */
+-extern void rl_add_undo PARAMS((enum undo_code, int, int, char *));
+-extern void rl_free_undo_list PARAMS((void));
+-extern int rl_do_undo PARAMS((void));
+-extern int rl_begin_undo_group PARAMS((void));
+-extern int rl_end_undo_group PARAMS((void));
+-extern int rl_modifying PARAMS((int, int));
++READLINE_DLL_IMPEXP void rl_add_undo PARAMS((enum undo_code, int, int, char *));
++READLINE_DLL_IMPEXP void rl_free_undo_list PARAMS((void));
++READLINE_DLL_IMPEXP int rl_do_undo PARAMS((void));
++READLINE_DLL_IMPEXP int rl_begin_undo_group PARAMS((void));
++READLINE_DLL_IMPEXP int rl_end_undo_group PARAMS((void));
++READLINE_DLL_IMPEXP int rl_modifying PARAMS((int, int));
+ 
+ /* Functions for redisplay. */
+-extern void rl_redisplay PARAMS((void));
+-extern int rl_on_new_line PARAMS((void));
+-extern int rl_on_new_line_with_prompt PARAMS((void));
+-extern int rl_forced_update_display PARAMS((void));
+-extern int rl_clear_message PARAMS((void));
+-extern int rl_reset_line_state PARAMS((void));
+-extern int rl_crlf PARAMS((void));
++READLINE_DLL_IMPEXP void rl_redisplay PARAMS((void));
++READLINE_DLL_IMPEXP int rl_on_new_line PARAMS((void));
++READLINE_DLL_IMPEXP int rl_on_new_line_with_prompt PARAMS((void));
++READLINE_DLL_IMPEXP int rl_forced_update_display PARAMS((void));
++READLINE_DLL_IMPEXP int rl_clear_message PARAMS((void));
++READLINE_DLL_IMPEXP int rl_reset_line_state PARAMS((void));
++READLINE_DLL_IMPEXP int rl_crlf PARAMS((void));
+ 
+ #if defined (USE_VARARGS) && defined (PREFER_STDARG)
+-extern int rl_message (const char *, ...)  __attribute__((__format__ (printf, 1, 2)));
++READLINE_DLL_IMPEXP int rl_message (const char *, ...)  __attribute__((__format__ (printf, 1, 2)));
+ #else
+-extern int rl_message ();
++READLINE_DLL_IMPEXP int rl_message ();
+ #endif
+ 
+-extern int rl_show_char PARAMS((int));
++READLINE_DLL_IMPEXP int rl_show_char PARAMS((int));
+ 
+ /* Undocumented in texinfo manual. */
+-extern int rl_character_len PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_character_len PARAMS((int, int));
+ 
+ /* Save and restore internal prompt redisplay information. */
+-extern void rl_save_prompt PARAMS((void));
+-extern void rl_restore_prompt PARAMS((void));
++READLINE_DLL_IMPEXP void rl_save_prompt PARAMS((void));
++READLINE_DLL_IMPEXP void rl_restore_prompt PARAMS((void));
+ 
+ /* Modifying text. */
+-extern void rl_replace_line PARAMS((const char *, int));
+-extern int rl_insert_text PARAMS((const char *));
+-extern int rl_delete_text PARAMS((int, int));
+-extern int rl_kill_text PARAMS((int, int));
+-extern char *rl_copy_text PARAMS((int, int));
++READLINE_DLL_IMPEXP void rl_replace_line PARAMS((const char *, int));
++READLINE_DLL_IMPEXP int rl_insert_text PARAMS((const char *));
++READLINE_DLL_IMPEXP int rl_delete_text PARAMS((int, int));
++READLINE_DLL_IMPEXP int rl_kill_text PARAMS((int, int));
++READLINE_DLL_IMPEXP char *rl_copy_text PARAMS((int, int));
+ 
+ /* Terminal and tty mode management. */
+-extern void rl_prep_terminal PARAMS((int));
+-extern void rl_deprep_terminal PARAMS((void));
+-extern void rl_tty_set_default_bindings PARAMS((Keymap));
+-extern void rl_tty_unset_default_bindings PARAMS((Keymap));
+-
+-extern int rl_reset_terminal PARAMS((const char *));
+-extern void rl_resize_terminal PARAMS((void));
+-extern void rl_set_screen_size PARAMS((int, int));
+-extern void rl_get_screen_size PARAMS((int *, int *));
+-extern void rl_reset_screen_size PARAMS((void));
++READLINE_DLL_IMPEXP void rl_prep_terminal PARAMS((int));
++READLINE_DLL_IMPEXP void rl_deprep_terminal PARAMS((void));
++READLINE_DLL_IMPEXP void rl_tty_set_default_bindings PARAMS((Keymap));
++READLINE_DLL_IMPEXP void rl_tty_unset_default_bindings PARAMS((Keymap));
++
++READLINE_DLL_IMPEXP int rl_reset_terminal PARAMS((const char *));
++READLINE_DLL_IMPEXP void rl_resize_terminal PARAMS((void));
++READLINE_DLL_IMPEXP void rl_set_screen_size PARAMS((int, int));
++READLINE_DLL_IMPEXP void rl_get_screen_size PARAMS((int *, int *));
++READLINE_DLL_IMPEXP void rl_reset_screen_size PARAMS((void));
+ 
+-extern char *rl_get_termcap PARAMS((const char *));
++READLINE_DLL_IMPEXP char *rl_get_termcap PARAMS((const char *));
+ 
+ /* Functions for character input. */
+-extern int rl_stuff_char PARAMS((int));
+-extern int rl_execute_next PARAMS((int));
+-extern int rl_clear_pending_input PARAMS((void));
+-extern int rl_read_key PARAMS((void));
+-extern int rl_getc PARAMS((FILE *));
+-extern int rl_set_keyboard_input_timeout PARAMS((int));
++READLINE_DLL_IMPEXP int rl_stuff_char PARAMS((int));
++READLINE_DLL_IMPEXP int rl_execute_next PARAMS((int));
++READLINE_DLL_IMPEXP int rl_clear_pending_input PARAMS((void));
++READLINE_DLL_IMPEXP int rl_read_key PARAMS((void));
++READLINE_DLL_IMPEXP int rl_getc PARAMS((FILE *));
++READLINE_DLL_IMPEXP int rl_set_keyboard_input_timeout PARAMS((int));
+ 
+ /* `Public' utility functions . */
+-extern void rl_extend_line_buffer PARAMS((int));
+-extern int rl_ding PARAMS((void));
+-extern int rl_alphabetic PARAMS((int));
++READLINE_DLL_IMPEXP void rl_extend_line_buffer PARAMS((int));
++READLINE_DLL_IMPEXP int rl_ding PARAMS((void));
++READLINE_DLL_IMPEXP int rl_alphabetic PARAMS((int));
+ 
+ /* Readline signal handling, from signals.c */
+-extern int rl_set_signals PARAMS((void));
+-extern int rl_clear_signals PARAMS((void));
+-extern void rl_cleanup_after_signal PARAMS((void));
+-extern void rl_reset_after_signal PARAMS((void));
+-extern void rl_free_line_state PARAMS((void));
++READLINE_DLL_IMPEXP int rl_set_signals PARAMS((void));
++READLINE_DLL_IMPEXP int rl_clear_signals PARAMS((void));
++READLINE_DLL_IMPEXP void rl_cleanup_after_signal PARAMS((void));
++READLINE_DLL_IMPEXP void rl_reset_after_signal PARAMS((void));
++READLINE_DLL_IMPEXP void rl_free_line_state PARAMS((void));
+  
+-extern int rl_set_paren_blink_timeout PARAMS((int));
++READLINE_DLL_IMPEXP int rl_set_paren_blink_timeout PARAMS((int));
+ 
+ /* Undocumented. */
+-extern int rl_maybe_save_line PARAMS((void));
+-extern int rl_maybe_unsave_line PARAMS((void));
+-extern int rl_maybe_replace_line PARAMS((void));
++READLINE_DLL_IMPEXP int rl_maybe_save_line PARAMS((void));
++READLINE_DLL_IMPEXP int rl_maybe_unsave_line PARAMS((void));
++READLINE_DLL_IMPEXP int rl_maybe_replace_line PARAMS((void));
+ 
+ /* Completion functions. */
+-extern int rl_complete_internal PARAMS((int));
+-extern void rl_display_match_list PARAMS((char **, int, int));
++READLINE_DLL_IMPEXP int rl_complete_internal PARAMS((int));
++READLINE_DLL_IMPEXP void rl_display_match_list PARAMS((char **, int, int));
+ 
+-extern char **rl_completion_matches PARAMS((const char *, rl_compentry_func_t *));
+-extern char *rl_username_completion_function PARAMS((const char *, int));
+-extern char *rl_filename_completion_function PARAMS((const char *, int));
++READLINE_DLL_IMPEXP char **rl_completion_matches PARAMS((const char *, rl_compentry_func_t *));
++READLINE_DLL_IMPEXP char *rl_username_completion_function PARAMS((const char *, int));
++READLINE_DLL_IMPEXP char *rl_filename_completion_function PARAMS((const char *, int));
+ 
+-extern int rl_completion_mode PARAMS((rl_command_func_t *));
++READLINE_DLL_IMPEXP int rl_completion_mode PARAMS((rl_command_func_t *));
+ 
+ #if 0
+ /* Backwards compatibility (compat.c).  These will go away sometime. */
+-extern void free_undo_list PARAMS((void));
+-extern int maybe_save_line PARAMS((void));
+-extern int maybe_unsave_line PARAMS((void));
+-extern int maybe_replace_line PARAMS((void));
+-
+-extern int ding PARAMS((void));
+-extern int alphabetic PARAMS((int));
+-extern int crlf PARAMS((void));
+-
+-extern char **completion_matches PARAMS((char *, rl_compentry_func_t *));
+-extern char *username_completion_function PARAMS((const char *, int));
+-extern char *filename_completion_function PARAMS((const char *, int));
++READLINE_DLL_IMPEXP void free_undo_list PARAMS((void));
++READLINE_DLL_IMPEXP int maybe_save_line PARAMS((void));
++READLINE_DLL_IMPEXP int maybe_unsave_line PARAMS((void));
++READLINE_DLL_IMPEXP int maybe_replace_line PARAMS((void));
++
++READLINE_DLL_IMPEXP int ding PARAMS((void));
++READLINE_DLL_IMPEXP int alphabetic PARAMS((int));
++READLINE_DLL_IMPEXP int crlf PARAMS((void));
++
++READLINE_DLL_IMPEXP char **completion_matches PARAMS((char *, rl_compentry_func_t *));
++READLINE_DLL_IMPEXP char *username_completion_function PARAMS((const char *, int));
++READLINE_DLL_IMPEXP char *filename_completion_function PARAMS((const char *, int));
+ #endif
+ 
+ /* **************************************************************** */
+@@ -468,136 +482,136 @@ extern char *filename_completion_functio
+ /* **************************************************************** */
+ 
+ /* The version of this incarnation of the readline library. */
+-extern const char *rl_library_version;		/* e.g., "4.2" */
+-extern int rl_readline_version;			/* e.g., 0x0402 */
++READLINE_DLL_IMPEXP const char *rl_library_version;		/* e.g., "4.2" */
++READLINE_DLL_IMPEXP int rl_readline_version;			/* e.g., 0x0402 */
+ 
+ /* True if this is real GNU readline. */
+-extern int rl_gnu_readline_p;
++READLINE_DLL_IMPEXP int rl_gnu_readline_p;
+ 
+ /* Flags word encapsulating the current readline state. */
+-extern int rl_readline_state;
++READLINE_DLL_IMPEXP int rl_readline_state;
+ 
+ /* Says which editing mode readline is currently using.  1 means emacs mode;
+    0 means vi mode. */
+-extern int rl_editing_mode;
++READLINE_DLL_IMPEXP int rl_editing_mode;
+ 
+ /* Insert or overwrite mode for emacs mode.  1 means insert mode; 0 means
+    overwrite mode.  Reset to insert mode on each input line. */
+-extern int rl_insert_mode;
++READLINE_DLL_IMPEXP int rl_insert_mode;
+ 
+ /* The name of the calling program.  You should initialize this to
+    whatever was in argv[0].  It is used when parsing conditionals. */
+-extern const char *rl_readline_name;
++READLINE_DLL_IMPEXP const char *rl_readline_name;
+ 
+ /* The prompt readline uses.  This is set from the argument to
+    readline (), and should not be assigned to directly. */
+-extern char *rl_prompt;
++READLINE_DLL_IMPEXP char *rl_prompt;
+ 
+ /* The line buffer that is in use. */
+-extern char *rl_line_buffer;
++READLINE_DLL_IMPEXP char *rl_line_buffer;
+ 
+ /* The location of point, and end. */
+-extern int rl_point;
+-extern int rl_end;
++READLINE_DLL_IMPEXP int rl_point;
++READLINE_DLL_IMPEXP int rl_end;
+ 
+ /* The mark, or saved cursor position. */
+-extern int rl_mark;
++READLINE_DLL_IMPEXP int rl_mark;
+ 
+ /* Flag to indicate that readline has finished with the current input
+    line and should return it. */
+-extern int rl_done;
++READLINE_DLL_IMPEXP int rl_done;
+ 
+ /* If set to a character value, that will be the next keystroke read. */
+-extern int rl_pending_input;
++READLINE_DLL_IMPEXP int rl_pending_input;
+ 
+ /* Non-zero if we called this function from _rl_dispatch().  It's present
+    so functions can find out whether they were called from a key binding
+    or directly from an application. */
+-extern int rl_dispatching;
++READLINE_DLL_IMPEXP int rl_dispatching;
+ 
+ /* Non-zero if the user typed a numeric argument before executing the
+    current function. */
+-extern int rl_explicit_arg;
++READLINE_DLL_IMPEXP int rl_explicit_arg;
+ 
+ /* The current value of the numeric argument specified by the user. */
+-extern int rl_numeric_arg;
++READLINE_DLL_IMPEXP int rl_numeric_arg;
+ 
+ /* The address of the last command function Readline executed. */
+-extern rl_command_func_t *rl_last_func;
++READLINE_DLL_IMPEXP rl_command_func_t *rl_last_func;
+ 
+ /* The name of the terminal to use. */
+-extern const char *rl_terminal_name;
++READLINE_DLL_IMPEXP const char *rl_terminal_name;
+ 
+ /* The input and output streams. */
+-extern FILE *rl_instream;
+-extern FILE *rl_outstream;
++READLINE_DLL_IMPEXP FILE *rl_instream;
++READLINE_DLL_IMPEXP FILE *rl_outstream;
+ 
+ /* If non-zero, Readline gives values of LINES and COLUMNS from the environment
+    greater precedence than values fetched from the kernel when computing the
+    screen dimensions. */
+-extern int rl_prefer_env_winsize;
++READLINE_DLL_IMPEXP int rl_prefer_env_winsize;
+ 
+ /* If non-zero, then this is the address of a function to call just
+    before readline_internal () prints the first prompt. */
+-extern rl_hook_func_t *rl_startup_hook;
++READLINE_DLL_IMPEXP rl_hook_func_t *rl_startup_hook;
+ 
+ /* If non-zero, this is the address of a function to call just before
+    readline_internal_setup () returns and readline_internal starts
+    reading input characters. */
+-extern rl_hook_func_t *rl_pre_input_hook;
++READLINE_DLL_IMPEXP rl_hook_func_t *rl_pre_input_hook;
+       
+ /* The address of a function to call periodically while Readline is
+    awaiting character input, or NULL, for no event handling. */
+-extern rl_hook_func_t *rl_event_hook;
++READLINE_DLL_IMPEXP rl_hook_func_t *rl_event_hook;
+ 
+ /* The address of the function to call to fetch a character from the current
+    Readline input stream */
+-extern rl_getc_func_t *rl_getc_function;
++READLINE_DLL_IMPEXP rl_getc_func_t *rl_getc_function;
+ 
+-extern rl_voidfunc_t *rl_redisplay_function;
++READLINE_DLL_IMPEXP rl_voidfunc_t *rl_redisplay_function;
+ 
+-extern rl_vintfunc_t *rl_prep_term_function;
+-extern rl_voidfunc_t *rl_deprep_term_function;
++READLINE_DLL_IMPEXP rl_vintfunc_t *rl_prep_term_function;
++READLINE_DLL_IMPEXP rl_voidfunc_t *rl_deprep_term_function;
+ 
+ /* Dispatch variables. */
+-extern Keymap rl_executing_keymap;
+-extern Keymap rl_binding_keymap;
++READLINE_DLL_IMPEXP Keymap rl_executing_keymap;
++READLINE_DLL_IMPEXP Keymap rl_binding_keymap;
+ 
+ /* Display variables. */
+ /* If non-zero, readline will erase the entire line, including any prompt,
+    if the only thing typed on an otherwise-blank line is something bound to
+    rl_newline. */
+-extern int rl_erase_empty_line;
++READLINE_DLL_IMPEXP int rl_erase_empty_line;
+ 
+ /* If non-zero, the application has already printed the prompt (rl_prompt)
+    before calling readline, so readline should not output it the first time
+    redisplay is done. */
+-extern int rl_already_prompted;
++READLINE_DLL_IMPEXP int rl_already_prompted;
+ 
+ /* A non-zero value means to read only this many characters rather than
+    up to a character bound to accept-line. */
+-extern int rl_num_chars_to_read;
++READLINE_DLL_IMPEXP int rl_num_chars_to_read;
+ 
+ /* The text of a currently-executing keyboard macro. */
+-extern char *rl_executing_macro;
++READLINE_DLL_IMPEXP char *rl_executing_macro;
+ 
+ /* Variables to control readline signal handling. */
+ /* If non-zero, readline will install its own signal handlers for
+    SIGINT, SIGTERM, SIGQUIT, SIGALRM, SIGTSTP, SIGTTIN, and SIGTTOU. */
+-extern int rl_catch_signals;
++READLINE_DLL_IMPEXP int rl_catch_signals;
+ 
+ /* If non-zero, readline will install a signal handler for SIGWINCH
+    that also attempts to call any calling application's SIGWINCH signal
+    handler.  Note that the terminal is not cleaned up before the
+    application's signal handler is called; use rl_cleanup_after_signal()
+    to do that. */
+-extern int rl_catch_sigwinch;
++READLINE_DLL_IMPEXP int rl_catch_sigwinch;
+ 
+ /* Completion variables. */
+ /* Pointer to the generator function for completion_matches ().
+    NULL means to use rl_filename_completion_function (), the default
+    filename completer. */
+-extern rl_compentry_func_t *rl_completion_entry_function;
++READLINE_DLL_IMPEXP rl_compentry_func_t *rl_completion_entry_function;
+ 
+ /* If rl_ignore_some_completions_function is non-NULL it is the address
+    of a function to call after all of the possible matches have been
+@@ -605,7 +619,7 @@ extern rl_compentry_func_t *rl_completio
+    The function is called with one argument; a NULL terminated array
+    of (char *).  If your function removes any of the elements, they
+    must be free()'ed. */
+-extern rl_compignore_func_t *rl_ignore_some_completions_function;
++READLINE_DLL_IMPEXP rl_compignore_func_t *rl_ignore_some_completions_function;
+ 
+ /* Pointer to alternative function to create matches.
+    Function is called with TEXT, START, and END.
+@@ -614,46 +628,46 @@ extern rl_compignore_func_t *rl_ignore_s
+    If this function exists and returns NULL then call the value of
+    rl_completion_entry_function to try to match, otherwise use the
+    array of strings returned. */
+-extern rl_completion_func_t *rl_attempted_completion_function;
++READLINE_DLL_IMPEXP rl_completion_func_t *rl_attempted_completion_function;
+ 
+ /* The basic list of characters that signal a break between words for the
+    completer routine.  The initial contents of this variable is what
+    breaks words in the shell, i.e. "n\"\\'`@$>". */
+-extern const char *rl_basic_word_break_characters;
++READLINE_DLL_IMPEXP const char *rl_basic_word_break_characters;
+ 
+ /* The list of characters that signal a break between words for
+    rl_complete_internal.  The default list is the contents of
+    rl_basic_word_break_characters.  */
+-extern /*const*/ char *rl_completer_word_break_characters;
++READLINE_DLL_IMPEXP /*const*/ char *rl_completer_word_break_characters;
+ 
+ /* Hook function to allow an application to set the completion word
+    break characters before readline breaks up the line.  Allows
+    position-dependent word break characters. */
+-extern rl_cpvfunc_t *rl_completion_word_break_hook;
++READLINE_DLL_IMPEXP rl_cpvfunc_t *rl_completion_word_break_hook;
+ 
+ /* List of characters which can be used to quote a substring of the line.
+    Completion occurs on the entire substring, and within the substring   
+    rl_completer_word_break_characters are treated as any other character,
+    unless they also appear within this list. */
+-extern const char *rl_completer_quote_characters;
++READLINE_DLL_IMPEXP const char *rl_completer_quote_characters;
+ 
+ /* List of quote characters which cause a word break. */
+-extern const char *rl_basic_quote_characters;
++READLINE_DLL_IMPEXP const char *rl_basic_quote_characters;
+ 
+ /* List of characters that need to be quoted in filenames by the completer. */
+-extern const char *rl_filename_quote_characters;
++READLINE_DLL_IMPEXP const char *rl_filename_quote_characters;
+ 
+ /* List of characters that are word break characters, but should be left
+    in TEXT when it is passed to the completion function.  The shell uses
+    this to help determine what kind of completing to do. */
+-extern const char *rl_special_prefixes;
++READLINE_DLL_IMPEXP const char *rl_special_prefixes;
+ 
+ /* If non-zero, then this is the address of a function to call when
+    completing on a directory name.  The function is called with
+    the address of a string (the current directory name) as an arg.  It
+    changes what is displayed when the possible completions are printed
+    or inserted. */
+-extern rl_icppfunc_t *rl_directory_completion_hook;
++READLINE_DLL_IMPEXP rl_icppfunc_t *rl_directory_completion_hook;
+ 
+ /* If non-zero, this is the address of a function to call when completing
+    a directory name.  This function takes the address of the directory name
+@@ -662,7 +676,7 @@ extern rl_icppfunc_t *rl_directory_compl
+    when the possible completions are printed or inserted.  It is called
+    before rl_directory_completion_hook.  I'm not happy with how this works
+    yet, so it's undocumented. */
+-extern rl_icppfunc_t *rl_directory_rewrite_hook;
++READLINE_DLL_IMPEXP rl_icppfunc_t *rl_directory_rewrite_hook;
+ 
+ /* Backwards compatibility with previous versions of readline. */
+ #define rl_symbolic_link_hook rl_directory_completion_hook
+@@ -674,70 +688,70 @@ extern rl_icppfunc_t *rl_directory_rewri
+    where MATCHES is the array of strings that matched, NUM_MATCHES is the
+    number of strings in that array, and MAX_LENGTH is the length of the
+    longest string in that array. */
+-extern rl_compdisp_func_t *rl_completion_display_matches_hook;
++READLINE_DLL_IMPEXP rl_compdisp_func_t *rl_completion_display_matches_hook;
+ 
+ /* Non-zero means that the results of the matches are to be treated
+    as filenames.  This is ALWAYS zero on entry, and can only be changed
+    within a completion entry finder function. */
+-extern int rl_filename_completion_desired;
++READLINE_DLL_IMPEXP int rl_filename_completion_desired;
+ 
+ /* Non-zero means that the results of the matches are to be quoted using
+    double quotes (or an application-specific quoting mechanism) if the
+    filename contains any characters in rl_word_break_chars.  This is
+    ALWAYS non-zero on entry, and can only be changed within a completion
+    entry finder function. */
+-extern int rl_filename_quoting_desired;
++READLINE_DLL_IMPEXP int rl_filename_quoting_desired;
+ 
+ /* Set to a function to quote a filename in an application-specific fashion.
+    Called with the text to quote, the type of match found (single or multiple)
+    and a pointer to the quoting character to be used, which the function can
+    reset if desired. */
+-extern rl_quote_func_t *rl_filename_quoting_function;
++READLINE_DLL_IMPEXP rl_quote_func_t *rl_filename_quoting_function;
+ 
+ /* Function to call to remove quoting characters from a filename.  Called
+    before completion is attempted, so the embedded quotes do not interfere
+    with matching names in the file system. */
+-extern rl_dequote_func_t *rl_filename_dequoting_function;
++READLINE_DLL_IMPEXP rl_dequote_func_t *rl_filename_dequoting_function;
+ 
+ /* Function to call to decide whether or not a word break character is
+    quoted.  If a character is quoted, it does not break words for the
+    completer. */
+-extern rl_linebuf_func_t *rl_char_is_quoted_p;
++READLINE_DLL_IMPEXP rl_linebuf_func_t *rl_char_is_quoted_p;
+ 
+ /* Non-zero means to suppress normal filename completion after the
+    user-specified completion function has been called. */
+-extern int rl_attempted_completion_over;
++READLINE_DLL_IMPEXP int rl_attempted_completion_over;
+ 
+ /* Set to a character describing the type of completion being attempted by
+    rl_complete_internal; available for use by application completion
+    functions. */
+-extern int rl_completion_type;
++READLINE_DLL_IMPEXP int rl_completion_type;
+ 
+ /* Up to this many items will be displayed in response to a
+    possible-completions call.  After that, we ask the user if she
+    is sure she wants to see them all.  The default value is 100. */
+-extern int rl_completion_query_items;
++READLINE_DLL_IMPEXP int rl_completion_query_items;
+ 
+ /* Character appended to completed words when at the end of the line.  The
+    default is a space.  Nothing is added if this is '\0'. */
+-extern int rl_completion_append_character;
++READLINE_DLL_IMPEXP int rl_completion_append_character;
+ 
+ /* If set to non-zero by an application completion function,
+    rl_completion_append_character will not be appended. */
+-extern int rl_completion_suppress_append;
++READLINE_DLL_IMPEXP int rl_completion_suppress_append;
+ 
+ /* Set to any quote character readline thinks it finds before any application
+    completion function is called. */
+-extern int rl_completion_quote_character;
++READLINE_DLL_IMPEXP int rl_completion_quote_character;
+ 
+ /* Set to a non-zero value if readline found quoting anywhere in the word to
+    be completed; set before any application completion function is called. */
+-extern int rl_completion_found_quote;
++READLINE_DLL_IMPEXP int rl_completion_found_quote;
+ 
+ /* If non-zero, the completion functions don't append any closing quote.
+    This is set to 0 by rl_complete_internal and may be changed by an
+    application-specific completion function. */
+-extern int rl_completion_suppress_quote;
++READLINE_DLL_IMPEXP int rl_completion_suppress_quote;
+ 
+ /* If non-zero, a slash will be appended to completed filenames that are
+    symbolic links to directory names, subject to the value of the
+@@ -748,14 +762,14 @@ extern int rl_completion_suppress_quote;
+    rl_complete_internal before any application-specific completion
+    function is called, so without that function doing anything, the user's
+    preferences are honored. */
+-extern int rl_completion_mark_symlink_dirs;
++READLINE_DLL_IMPEXP int rl_completion_mark_symlink_dirs;
+ 
+ /* If non-zero, then disallow duplicates in the matches. */
+-extern int rl_ignore_completion_duplicates;
++READLINE_DLL_IMPEXP int rl_ignore_completion_duplicates;
+ 
+ /* If this is non-zero, completion is (temporarily) inhibited, and the
+    completion character will be inserted as any other. */
+-extern int rl_inhibit_completion;
++READLINE_DLL_IMPEXP int rl_inhibit_completion;
+ 
+ /* Input error; can be returned by (*rl_getc_function) if readline is reading
+    a top-level command (RL_ISSTATE (RL_STATE_READCMD)). */
+@@ -843,8 +857,8 @@ struct readline_state {
+   char reserved[64];
+ };
+ 
+-extern int rl_save_state PARAMS((struct readline_state *));
+-extern int rl_restore_state PARAMS((struct readline_state *));
++READLINE_DLL_IMPEXP int rl_save_state PARAMS((struct readline_state *));
++READLINE_DLL_IMPEXP int rl_restore_state PARAMS((struct readline_state *));
+ 
+ #ifdef __cplusplus
+ }
+diff -ipuwr readline-5.2-orig/rldefs.h readline-5.2-src/rldefs.h
+--- readline-5.2-orig/rldefs.h	2005-07-05 06:27:26.000000000 +0200
++++ readline-5.2-src/rldefs.h	2006-11-12 11:37:43.484375000 +0100
+@@ -76,15 +76,18 @@ extern char *strchr (), *strrchr ();
+ #if defined (HAVE_STRCASECMP)
+ #define _rl_stricmp strcasecmp
+ #define _rl_strnicmp strncasecmp
++#elif defined (_WIN32)
++#define _rl_stricmp stricmp
++#define _rl_strnicmp strnicmp
+ #else
+-extern int _rl_stricmp PARAMS((char *, char *));
+-extern int _rl_strnicmp PARAMS((char *, char *, int));
++READLINE_DLL_IMPEXP int _rl_stricmp PARAMS((char *, char *));
++READLINE_DLL_IMPEXP int _rl_strnicmp PARAMS((char *, char *, int));
+ #endif
+ 
+ #if defined (HAVE_STRPBRK) && !defined (HAVE_MULTIBYTE)
+ #  define _rl_strpbrk(a,b)	strpbrk((a),(b))
+ #else
+-extern char *_rl_strpbrk PARAMS((const char *, const char *));
++READLINE_DLL_IMPEXP char *_rl_strpbrk PARAMS((const char *, const char *));
+ #endif
+ 
+ #if !defined (emacs_mode)
+@@ -154,6 +157,30 @@ extern char *_rl_strpbrk PARAMS((const c
+ #  define SWAP(s, e)  do { int t; t = s; s = e; e = t; } while (0)
+ #endif
+ 
++#if defined (_WIN32)
++#define WAIT_FOR_INPUT 200	/* milliseconds to suspend maximally 
++ 				   when waiting for input */
++#define FOR_INPUT	1	/* flags for open state of the console  */
++#define FOR_OUTPUT	2
++#define INITIALIZED	4
++
++/* undefine this when readline / history should not look into the registry
++   for the path to their init files  */
++#define INITFILES_IN_REGISTRY 1
++ 
++#if defined (INITFILES_IN_REGISTRY)
++/* We also try to get the .inputrc and .history file paths from the registry,
++   define what to look for */
++#define READLINE_REGKEY	"Software\\Free Software Foundation\\libreadline"
++#define INPUTRC_REGVAL	"inputrc-file"
++#define HISTFILE_REGVAL	"history-file"
++
++READLINE_DLL_IMPEXP char *_rl_get_user_registry_string (char *keyName, char* valName);
++
++#endif
++ 
++#endif	/* _WIN32  */
++ 
+ /* CONFIGURATION SECTION */
+ #include "rlconf.h"
+ 
+diff -ipuwr readline-5.2-orig/rlmbutil.h readline-5.2-src/rlmbutil.h
+--- readline-5.2-orig/rlmbutil.h	2006-09-12 23:44:38.000000000 +0200
++++ readline-5.2-src/rlmbutil.h	2006-11-12 11:37:43.500000000 +0100
+@@ -1,6 +1,6 @@
+ /* rlmbutil.h -- utility functions for multibyte characters. */
+ 
+-/* Copyright (C) 2001 Free Software Foundation, Inc.
++/* Copyright (C) 2001, 2003 Free Software Foundation, Inc.
+ 
+    This file is part of the GNU Readline Library, a library for
+    reading lines of text with interactive input and history editing.
+@@ -92,19 +92,19 @@
+ #define MB_FIND_ANY	0x00
+ #define MB_FIND_NONZERO	0x01
+ 
+-extern int _rl_find_prev_mbchar PARAMS((char *, int, int));
+-extern int _rl_find_next_mbchar PARAMS((char *, int, int, int));
++READLINE_DLL_IMPEXP int _rl_find_prev_mbchar PARAMS((char *, int, int));
++READLINE_DLL_IMPEXP int _rl_find_next_mbchar PARAMS((char *, int, int, int));
+ 
+ #ifdef HANDLE_MULTIBYTE
+ 
+-extern int _rl_compare_chars PARAMS((char *, int, mbstate_t *, char *, int, mbstate_t *));
+-extern int _rl_get_char_len PARAMS((char *, mbstate_t *));
+-extern int _rl_adjust_point PARAMS((char *, int, mbstate_t *));
++READLINE_DLL_IMPEXP int _rl_compare_chars PARAMS((char *, int, mbstate_t *, char *, int, mbstate_t *));
++READLINE_DLL_IMPEXP int _rl_get_char_len PARAMS((char *, mbstate_t *));
++READLINE_DLL_IMPEXP int _rl_adjust_point PARAMS((char *, int, mbstate_t *));
+ 
+-extern int _rl_read_mbchar PARAMS((char *, int));
+-extern int _rl_read_mbstring PARAMS((int, char *, int));
++READLINE_DLL_IMPEXP int _rl_read_mbchar PARAMS((char *, int));
++READLINE_DLL_IMPEXP int _rl_read_mbstring PARAMS((int, char *, int));
+ 
+-extern int _rl_is_mbchar_matched PARAMS((char *, int, int, char *, int));
++READLINE_DLL_IMPEXP int _rl_is_mbchar_matched PARAMS((char *, int, int, char *, int));
+ 
+ extern wchar_t _rl_char_value PARAMS((char *, int));
+ extern int _rl_walphabetic PARAMS((wchar_t));
+@@ -150,6 +150,6 @@ extern int _rl_walphabetic PARAMS((wchar
+ 
+ #endif /* !HANDLE_MULTIBYTE */
+ 
+-extern int rl_byte_oriented;
++READLINE_DLL_IMPEXP int rl_byte_oriented;
+ 
+ #endif /* _RL_MBUTIL_H_ */
+diff -ipuwr readline-5.2-orig/rlprivate.h readline-5.2-src/rlprivate.h
+--- readline-5.2-orig/rlprivate.h	2006-07-18 17:36:32.000000000 +0200
++++ readline-5.2-src/rlprivate.h	2006-11-12 11:54:32.781250000 +0100
+@@ -130,26 +130,26 @@ typedef int _rl_callback_func_t PARAMS((
+  *************************************************************************/
+ 
+ /* complete.c */
+-extern int rl_complete_with_tilde_expansion;
++READLINE_DLL_IMPEXP int rl_complete_with_tilde_expansion;
+ #if defined (VISIBLE_STATS)
+-extern int rl_visible_stats;
++READLINE_DLL_IMPEXP int rl_visible_stats;
+ #endif /* VISIBLE_STATS */
+ 
+ /* readline.c */
+-extern int rl_line_buffer_len;
+-extern int rl_arg_sign;
+-extern int rl_visible_prompt_length;
+-extern int readline_echoing_p;
+-extern int rl_key_sequence_length;
+-extern int rl_byte_oriented;
++READLINE_DLL_IMPEXP int rl_line_buffer_len;
++READLINE_DLL_IMPEXP int rl_arg_sign;
++READLINE_DLL_IMPEXP int rl_visible_prompt_length;
++READLINE_DLL_IMPEXP int readline_echoing_p;
++READLINE_DLL_IMPEXP int rl_key_sequence_length;
++READLINE_DLL_IMPEXP int rl_byte_oriented;
+ 
+-extern _rl_keyseq_cxt *_rl_kscxt;
++READLINE_DLL_IMPEXP _rl_keyseq_cxt *_rl_kscxt;
+ 
+ /* display.c */
+-extern int rl_display_fixed;
++READLINE_DLL_IMPEXP int rl_display_fixed;
+ 
+ /* parens.c */
+-extern int rl_blink_matching_paren;
++READLINE_DLL_IMPEXP int rl_blink_matching_paren;
+ 
+ /*************************************************************************
+  *									 *
+@@ -337,89 +337,89 @@ extern void _rl_vi_done_inserting PARAMS
+  *************************************************************************/
+ 
+ /* bind.c */
+-extern const char *_rl_possible_control_prefixes[];
+-extern const char *_rl_possible_meta_prefixes[];
++READLINE_DLL_IMPEXP const char *_rl_possible_control_prefixes[];
++READLINE_DLL_IMPEXP const char *_rl_possible_meta_prefixes[];
+ 
+ /* callback.c */
+-extern _rl_callback_func_t *_rl_callback_func;
+-extern _rl_callback_generic_arg *_rl_callback_data;
++READLINE_DLL_IMPEXP _rl_callback_func_t *_rl_callback_func;
++READLINE_DLL_IMPEXP _rl_callback_generic_arg *_rl_callback_data;
+ 
+ /* complete.c */
+-extern int _rl_complete_show_all;
+-extern int _rl_complete_show_unmodified;
+-extern int _rl_complete_mark_directories;
+-extern int _rl_complete_mark_symlink_dirs;
+-extern int _rl_print_completions_horizontally;
+-extern int _rl_completion_case_fold;
+-extern int _rl_match_hidden_files;
+-extern int _rl_page_completions;
++READLINE_DLL_IMPEXP int _rl_complete_show_all;
++READLINE_DLL_IMPEXP int _rl_complete_show_unmodified;
++READLINE_DLL_IMPEXP int _rl_complete_mark_directories;
++READLINE_DLL_IMPEXP int _rl_complete_mark_symlink_dirs;
++READLINE_DLL_IMPEXP int _rl_print_completions_horizontally;
++READLINE_DLL_IMPEXP int _rl_completion_case_fold;
++READLINE_DLL_IMPEXP int _rl_match_hidden_files;
++READLINE_DLL_IMPEXP int _rl_page_completions;
+ 
+ /* display.c */
+-extern int _rl_vis_botlin;
+-extern int _rl_last_c_pos;
+-extern int _rl_suppress_redisplay;
+-extern int _rl_want_redisplay;
+-extern char *rl_display_prompt;
++READLINE_DLL_IMPEXP int _rl_vis_botlin;
++READLINE_DLL_IMPEXP int _rl_last_c_pos;
++READLINE_DLL_IMPEXP int _rl_suppress_redisplay;
++READLINE_DLL_IMPEXP int _rl_want_redisplay;
++READLINE_DLL_IMPEXP char *rl_display_prompt;
+ 
+ /* isearch.c */
+-extern char *_rl_isearch_terminators;
++READLINE_DLL_IMPEXP char *_rl_isearch_terminators;
+ 
+-extern _rl_search_cxt *_rl_iscxt;
++READLINE_DLL_IMPEXP _rl_search_cxt *_rl_iscxt;
+ 
+ /* macro.c */
+-extern char *_rl_executing_macro;
++READLINE_DLL_IMPEXP char *_rl_executing_macro;
+ 
+ /* misc.c */
+-extern int _rl_history_preserve_point;
+-extern int _rl_history_saved_point;
++READLINE_DLL_IMPEXP int _rl_history_preserve_point;
++READLINE_DLL_IMPEXP int _rl_history_saved_point;
+ 
+-extern _rl_arg_cxt _rl_argcxt;
++READLINE_DLL_IMPEXP _rl_arg_cxt _rl_argcxt;
+ 
+ /* readline.c */
+-extern int _rl_horizontal_scroll_mode;
+-extern int _rl_mark_modified_lines;
+-extern int _rl_bell_preference;
+-extern int _rl_meta_flag;
+-extern int _rl_convert_meta_chars_to_ascii;
+-extern int _rl_output_meta_chars;
+-extern int _rl_bind_stty_chars;
+-extern char *_rl_comment_begin;
+-extern unsigned char _rl_parsing_conditionalized_out;
+-extern Keymap _rl_keymap;
+-extern FILE *_rl_in_stream;
+-extern FILE *_rl_out_stream;
+-extern int _rl_last_command_was_kill;
+-extern int _rl_eof_char;
+-extern procenv_t readline_top_level;
++READLINE_DLL_IMPEXP int _rl_horizontal_scroll_mode;
++READLINE_DLL_IMPEXP int _rl_mark_modified_lines;
++READLINE_DLL_IMPEXP int _rl_bell_preference;
++READLINE_DLL_IMPEXP int _rl_meta_flag;
++READLINE_DLL_IMPEXP int _rl_convert_meta_chars_to_ascii;
++READLINE_DLL_IMPEXP int _rl_output_meta_chars;
++READLINE_DLL_IMPEXP int _rl_bind_stty_chars;
++READLINE_DLL_IMPEXP char *_rl_comment_begin;
++READLINE_DLL_IMPEXP unsigned char _rl_parsing_conditionalized_out;
++READLINE_DLL_IMPEXP Keymap _rl_keymap;
++READLINE_DLL_IMPEXP FILE *_rl_in_stream;
++READLINE_DLL_IMPEXP FILE *_rl_out_stream;
++READLINE_DLL_IMPEXP int _rl_last_command_was_kill;
++READLINE_DLL_IMPEXP int _rl_eof_char;
++READLINE_DLL_IMPEXP procenv_t readline_top_level;
+ 
+ /* search.c */
+-extern _rl_search_cxt *_rl_nscxt;
++READLINE_DLL_IMPEXP _rl_search_cxt *_rl_nscxt;
+ 
+ /* terminal.c */
+-extern int _rl_enable_keypad;
+-extern int _rl_enable_meta;
+-extern char *_rl_term_clreol;
+-extern char *_rl_term_clrpag;
+-extern char *_rl_term_im;
+-extern char *_rl_term_ic;
+-extern char *_rl_term_ei;
+-extern char *_rl_term_DC;
+-extern char *_rl_term_up;
+-extern char *_rl_term_dc;
+-extern char *_rl_term_cr;
+-extern char *_rl_term_IC;
+-extern char *_rl_term_forward_char;
+-extern int _rl_screenheight;
+-extern int _rl_screenwidth;
+-extern int _rl_screenchars;
+-extern int _rl_terminal_can_insert;
+-extern int _rl_term_autowrap;
++READLINE_DLL_IMPEXP int _rl_enable_keypad;
++READLINE_DLL_IMPEXP int _rl_enable_meta;
++READLINE_DLL_IMPEXP char *_rl_term_clreol;
++READLINE_DLL_IMPEXP char *_rl_term_clrpag;
++READLINE_DLL_IMPEXP char *_rl_term_im;
++READLINE_DLL_IMPEXP char *_rl_term_ic;
++READLINE_DLL_IMPEXP char *_rl_term_ei;
++READLINE_DLL_IMPEXP char *_rl_term_DC;
++READLINE_DLL_IMPEXP char *_rl_term_up;
++READLINE_DLL_IMPEXP char *_rl_term_dc;
++READLINE_DLL_IMPEXP char *_rl_term_cr;
++READLINE_DLL_IMPEXP char *_rl_term_IC;
++READLINE_DLL_IMPEXP char *_rl_term_forward_char;
++READLINE_DLL_IMPEXP int _rl_screenheight;
++READLINE_DLL_IMPEXP int _rl_screenwidth;
++READLINE_DLL_IMPEXP int _rl_screenchars;
++READLINE_DLL_IMPEXP int _rl_terminal_can_insert;
++READLINE_DLL_IMPEXP int _rl_term_autowrap;
+ 
+ /* undo.c */
+-extern int _rl_doing_an_undo;
+-extern int _rl_undo_group_level;
++READLINE_DLL_IMPEXP int _rl_doing_an_undo;
++READLINE_DLL_IMPEXP int _rl_undo_group_level;
+ 
+ /* vi_mode.c */
+-extern int _rl_vi_last_command;
++READLINE_DLL_IMPEXP int _rl_vi_last_command;
+ 
+ #endif /* _RL_PRIVATE_H_ */
+diff -ipuwr readline-5.2-orig/rlshell.h readline-5.2-src/rlshell.h
+--- readline-5.2-orig/rlshell.h	2001-08-22 16:37:56.000000000 +0200
++++ readline-5.2-src/rlshell.h	2006-11-12 11:37:43.500000000 +0100
+@@ -25,10 +25,10 @@
+ 
+ #include "rlstdc.h"
+ 
+-extern char *sh_single_quote PARAMS((char *));
+-extern void sh_set_lines_and_columns PARAMS((int, int));
+-extern char *sh_get_env_value PARAMS((const char *));
+-extern char *sh_get_home_dir PARAMS((void));
+-extern int sh_unset_nodelay_mode PARAMS((int));
++READLINE_DLL_IMPEXP char *sh_single_quote PARAMS((char *));
++READLINE_DLL_IMPEXP void sh_set_lines_and_columns PARAMS((int, int));
++READLINE_DLL_IMPEXP char *sh_get_env_value PARAMS((const char *));
++READLINE_DLL_IMPEXP char *sh_get_home_dir PARAMS((void));
++READLINE_DLL_IMPEXP int sh_unset_nodelay_mode PARAMS((int));
+ 
+ #endif /* _RL_SHELL_H_ */
+diff -ipuwr readline-5.2-orig/rlstdc.h readline-5.2-src/rlstdc.h
+--- readline-5.2-orig/rlstdc.h	2003-05-30 22:08:02.000000000 +0200
++++ readline-5.2-src/rlstdc.h	2006-11-12 11:37:43.500000000 +0100
+@@ -42,4 +42,28 @@
+ #  endif
+ #endif
+ 
++#ifndef __GNUC__
++# define __DLL_IMPORT__  __declspec(dllimport)
++# define __DLL_EXPORT__  __declspec(dllexport)
++#else
++# define __DLL_IMPORT__  __attribute__((dllimport)) extern
++# define __DLL_EXPORT__  __attribute__((dllexport)) extern
++#endif 
++
++#if (defined __WIN32__) || (defined _WIN32)
++# ifdef BUILD_READLINE_DLL
++#  define READLINE_DLL_IMPEXP     __DLL_EXPORT__
++# elif defined(READLINE_STATIC)
++#  define READLINE_DLL_IMPEXP     extern
++# elif defined (USE_READLINE_DLL)
++#  define READLINE_DLL_IMPEXP     __DLL_IMPORT__
++# elif defined (USE_READLINE_STATIC)
++#  define READLINE_DLL_IMPEXP     extern
++# else /* assume USE_READLINE_DLL */
++#  define READLINE_DLL_IMPEXP     __DLL_IMPORT__
++# endif
++#else /* __WIN32__ */
++# define READLINE_DLL_IMPEXP
++#endif
++
+ #endif /* !_RL_STDC_H_ */
+diff -ipuwr readline-5.2-orig/rltty.c readline-5.2-src/rltty.c
+--- readline-5.2-orig/rltty.c	2005-12-26 23:21:50.000000000 +0100
++++ readline-5.2-src/rltty.c	2006-11-12 11:37:43.500000000 +0100
+@@ -26,6 +26,9 @@
+ #  include <config.h>
+ #endif
+ 
++/* for native Win32 environments this is hard stuff  */
++#if !defined (_WIN32)
++
+ #include <sys/types.h>
+ #include <signal.h>
+ #include <errno.h>
+@@ -42,6 +45,12 @@
+ #endif /* GWINSZ_IN_SYS_IOCTL */
+ 
+ #include "rltty.h"
++
++#else	/* _WIN32 */
++#include "rldefs.h"
++#include <stdio.h>
++#endif	/* _WIN32 */
++
+ #include "readline.h"
+ #include "rlprivate.h"
+ 
+@@ -57,6 +66,7 @@ static void release_sigint PARAMS((void)
+ 
+ static void set_winsize PARAMS((int));
+ 
++#if !defined (_WIN32)
+ /* **************************************************************** */
+ /*								    */
+ /*			   Signal Management			    */
+@@ -231,7 +241,9 @@ get_tty_settings (tty, tiop)
+      int tty;
+      TIOTYPE *tiop;
+ {
++#if defined (TIOCGWINSZ)
+   set_winsize (tty);
++#endif
+ 
+   tiop->flags = tiop->lflag = 0;
+ 
+@@ -519,7 +531,9 @@ get_tty_settings (tty, tiop)
+      int tty;
+      TIOTYPE *tiop;
+ {
++#if defined (TIOCGWINSZ)
+   set_winsize (tty);
++#endif
+ 
+   errno = 0;
+   if (_get_tty_settings (tty, tiop) < 0)
+@@ -941,6 +955,115 @@ rltty_set_default_bindings (kmap)
+ #endif
+ }
+ 
++#else /* __MING32__ */
++
++/* **************************************************************** */
++/*								    */
++/*		Default Key Bindings for Win32 Console              */
++/*								    */
++/* **************************************************************** */
++
++#include <windows.h>
++
++#define CONSOLE_MODE	ENABLE_PROCESSED_INPUT | ENABLE_MOUSE_INPUT
++
++/* global vars used by other modules */
++
++int	haveConsole	= 0;	/* remember init result of the console  */
++HANDLE	hStdout, hStdin;	/* these are different from stdin, stdout  */
++
++COORD	rlScreenOrigin;		/* readline origin in frame buffer coordinates */
++int	rlScreenStart = 0;	/* readline origin as frame screen buffer offset */
++COORD	rlScreenEnd;		/* end of line in frame buffer coordinates */
++int	rlScreenMax = 0;	/* end of line as linear frame buffer offset */
++
++static DWORD savedConsoleMode = 0;	/* to restore console on exit */
++
++void
++rltty_set_default_bindings (kmap)
++     Keymap kmap;
++{
++  /* I bet this is required on Win32 ;-) */
++  {
++    char buf[40]; strcpy(buf,"set bell-style none");
++    rl_parse_and_bind(buf);
++  }
++  rl_set_key ("\\M-\\ø&", rl_get_previous_history, kmap);
++  rl_set_key ("\\M-\\ø(", rl_get_next_history, kmap);
++  rl_set_key ("\\M-\\ø'", rl_forward, kmap);
++  rl_set_key ("\\M-\\ø%", rl_backward, kmap);
++  
++  rl_set_key ("\\M-\\ø$", rl_beg_of_line, kmap);
++  rl_set_key ("\\M-\\ø#", rl_end_of_line, kmap);
++  rl_set_key ("\\M-\\ú%", rl_backward_word, kmap);
++  rl_set_key ("\\M-\\ú'", rl_forward_word, kmap);
++  
++  rl_set_key ("\\M-\\ù-", rl_paste_from_clipboard, kmap);
++  rl_set_key ("\\M-\\ø.", rl_delete, kmap);
++  rl_set_key ("", rl_unix_word_rubout, kmap);
++}
++
++/* Query and set up a Window Console */
++
++void
++rl_prep_terminal (meta_flag)
++     int meta_flag;
++{
++  readline_echoing_p = 1;
++  
++  if ( !(haveConsole & INITIALIZED) )
++    {
++      if ( !(haveConsole & FOR_INPUT)
++	   && ((hStdin = GetStdHandle(STD_INPUT_HANDLE)) != INVALID_HANDLE_VALUE) )
++        {
++          DWORD dummy;
++          INPUT_RECORD irec;
++          if ( PeekConsoleInput(hStdin, &irec, 1, &dummy) )
++            {
++              haveConsole |= FOR_INPUT;
++              if ( GetConsoleMode(hStdin, &savedConsoleMode) )
++                SetConsoleMode(hStdin, CONSOLE_MODE);
++            }
++        }
++      if ( (hStdout = GetStdHandle(STD_OUTPUT_HANDLE)) != INVALID_HANDLE_VALUE)
++        {
++          CONSOLE_SCREEN_BUFFER_INFO csbi;
++          if ( GetConsoleScreenBufferInfo(hStdout, &csbi) 
++               && (csbi.dwSize.X > 0) && (csbi.dwSize.Y > 0) )
++            {
++              haveConsole |= FOR_OUTPUT;
++              rlScreenOrigin = csbi.dwCursorPosition;
++              rlScreenStart = (int)csbi.dwCursorPosition.Y * (int)csbi.dwSize.X
++		+ (int)csbi.dwCursorPosition.X;
++            }
++        }
++      haveConsole |= INITIALIZED;
++    }
++}
++
++/* Restore the consoles's normal settings and modes. */
++void
++rl_deprep_terminal ()
++{
++  SetConsoleMode(hStdin, savedConsoleMode);
++  haveConsole = 0;
++}
++
++int
++rl_restart_output (count, key)
++     int count, key;
++{
++  return 0;
++}
++
++int
++rl_stop_output (count, key)
++     int count, key;
++{
++  return 0;
++}
++#endif /* _WIN32 */
++
+ /* New public way to set the system default editing chars to their readline
+    equivalents. */
+ void
+@@ -950,6 +1073,7 @@ rl_tty_set_default_bindings (kmap)
+   rltty_set_default_bindings (kmap);
+ }
+ 
++#ifndef _WIN32
+ /* Rebind all of the tty special chars that readline worries about back
+    to self-insert.  Call this before saving the current terminal special
+    chars with save_tty_chars().  This only works on POSIX termios or termio
+@@ -973,6 +1097,13 @@ rl_tty_unset_default_bindings (kmap)
+   RESET_SPECIAL (_rl_tty_chars.t_werase);
+ #  endif /* VWERASE && TERMIOS_TTY_DRIVER */
+ }
++#else
++void
++rl_tty_unset_default_bindings (kmap)
++     Keymap kmap;
++{
++}
++#endif /* _WIN32 */
+ 
+ #if defined (HANDLE_SIGNALS)
+ 
+diff -ipuwr readline-5.2-orig/rltty.h readline-5.2-src/rltty.h
+--- readline-5.2-orig/rltty.h	2003-02-01 04:43:12.000000000 +0100
++++ readline-5.2-src/rltty.h	2006-11-12 11:37:43.515625000 +0100
+@@ -38,7 +38,7 @@
+ #endif /* TERMIO_TTY_DRIVER */
+ 
+ /* Other (BSD) machines use sgtty. */
+-#if defined (NEW_TTY_DRIVER)
++#if defined (NEW_TTY_DRIVER) && !defined (_WIN32)
+ #  include <sgtty.h>
+ #endif
+ 
+diff -ipuwr readline-5.2-orig/shell.c readline-5.2-src/shell.c
+--- readline-5.2-orig/shell.c	2005-05-07 21:42:02.000000000 +0200
++++ readline-5.2-src/shell.c	2006-11-12 11:37:43.515625000 +0100
+@@ -27,6 +27,7 @@
+ #endif
+ 
+ #include <sys/types.h>
++#include <stdio.h>
+ 
+ #if defined (HAVE_UNISTD_H)
+ #  include <unistd.h>
+@@ -54,6 +55,9 @@
+ #if defined (HAVE_PWD_H)
+ #include <pwd.h>
+ #endif
++#if defined (_WIN32)
++#include <windows.h>
++#endif /* _WIN32 */
+ 
+ #include <stdio.h>
+ 
+@@ -160,6 +164,7 @@ char *
+ sh_get_home_dir ()
+ {
+   char *home_dir;
++#if !defined (_WIN32)
+   struct passwd *entry;
+ 
+   home_dir = (char *)NULL;
+@@ -168,6 +173,9 @@ sh_get_home_dir ()
+   if (entry)
+     home_dir = entry->pw_dir;
+ #endif
++#else
++  home_dir = sh_get_env_value ("HOME");
++#endif /* !_WIN32 */
+   return (home_dir);
+ }
+ 
+@@ -177,6 +185,7 @@ sh_get_home_dir ()
+ #  endif
+ #endif
+ 
++#if !defined (_WIN32)
+ int
+ sh_unset_nodelay_mode (fd)
+      int fd;
+@@ -206,3 +215,30 @@ sh_unset_nodelay_mode (fd)
+ 
+   return 0;
+ }
++
++#else	/* !_WIN32  */
++
++char *
++_rl_get_user_registry_string (char *keyName, char* valName)
++{
++  char *result = NULL;
++  HKEY	subKey;
++  if ( keyName && (RegOpenKeyEx(HKEY_CURRENT_USER, keyName, 0, KEY_READ, &subKey)
++                   == ERROR_SUCCESS) )
++    {
++      DWORD type;
++      char *chtry = NULL;
++      DWORD bufSize = 0;
++
++      if ( (RegQueryValueExA(subKey, valName, NULL, &type, chtry, &bufSize)
++	    == ERROR_SUCCESS) && (type == REG_SZ) )
++        {
++	  if ( (chtry = (char *)xmalloc(bufSize))
++	       && (RegQueryValueExA(subKey, valName, NULL, &type, chtry, &bufSize)
++		   == ERROR_SUCCESS) )
++	    result = chtry;
++        }
++    }
++  return result;
++}
++#endif	/* !_WIN32  */
+diff -ipuwr readline-5.2-orig/shlib/Makefile.in readline-5.2-src/shlib/Makefile.in
+--- readline-5.2-orig/shlib/Makefile.in	2005-08-12 06:56:10.000000000 +0200
++++ readline-5.2-src/shlib/Makefile.in	2006-11-12 11:37:43.515625000 +0100
+@@ -29,7 +29,8 @@ RL_LIBRARY_VERSION = @LIBVERSION@
+ RL_LIBRARY_NAME = readline
+ 
+ srcdir = @srcdir@
+-VPATH = .:@top_srcdir@
++resdir = ../res
++VPATH = @top_srcdir@ @srcdir@ $(resdir)
+ topdir = @top_srcdir@
+ BUILD_DIR = @BUILD_DIR@
+ 
+@@ -42,9 +43,19 @@ RANLIB = @RANLIB@
+ AR = @AR@
+ ARFLAGS = @ARFLAGS@
+ RM = rm -f
+-CP = cp
+ MV = mv
++
++ifneq ($(shell expr '@CC@' : '.*-mno-cygwin'),0)
++  MINGW_BUILD = 1
++endif
++
++ifdef MINGW_BUILD
++  CP = cp -fp
++  LN = cp -fp
++else
++  CP = cp
+ LN = ln
++endif
+ 
+ SHELL = @MAKE_SHELL@
+ 
+@@ -76,7 +87,7 @@ LOCAL_DEFS = @LOCAL_DEFS@
+ # changes to bash-maintainers@gnu.org.
+ #
+ SHOBJ_CC = @SHOBJ_CC@
+-SHOBJ_CFLAGS = @SHOBJ_CFLAGS@
++SHOBJ_CFLAGS = @SHOBJ_CFLAGS@ -DBUILD_READLINE_DLL
+ SHOBJ_LD = @SHOBJ_LD@
+ 
+ SHOBJ_LDFLAGS = @SHOBJ_LDFLAGS@
+@@ -116,8 +127,20 @@ CCFLAGS = $(DEFS) $(LOCAL_DEFS) $(CPPFLA
+ 
+ # The name of the main library target.
+ 
++ifdef MINGW_BUILD
++  SHARED_READLINE = readline$(SHLIB_MAJOR).$(SHLIB_LIBSUFF)
++  SHARED_HISTORY = history$(SHLIB_MAJOR).$(SHLIB_LIBSUFF)
++
++  READLINE_GCC_DLL_EXP_LIB = libreadline.dll.a
++  READLINE_MSC_DLL_EXP_LIB = readline.dll.lib
++  READLINE_DLL_EXP_DEF = readline.def
++  HISTORY_GCC_DLL_EXP_LIB = libhistory.dll.a
++  HISTORY_MSC_DLL_EXP_LIB = history.dll.lib
++  HISTORY_DLL_EXP_DEF = history.def
++else
+ SHARED_READLINE = $(SHLIB_LIBPREF)readline$(SHLIB_DOT)$(SHLIB_LIBVERSION)
+ SHARED_HISTORY = $(SHLIB_LIBPREF)history$(SHLIB_DOT)$(SHLIB_LIBVERSION)
++endif
+ SHARED_LIBS = $(SHARED_READLINE) $(SHARED_HISTORY)
+ 
+ # The C code source files for this library.
+@@ -162,6 +185,19 @@ unsupported:
+ 	@echo "Please send the changes you made to bash-maintainers@gnu.org"
+ 	@echo "for inclusion in future bash and readline releases."
+ 
++ifdef MINGW_BUILD
++$(SHARED_READLINE):	$(SHARED_OBJ) readline-dllversion.so
++	$(RM) $@
++	$(CC) --shared $(SHARED_OBJ) readline-dllversion.so \
++	 -o $@ -Wl,--out-implib,$(READLINE_GCC_DLL_EXP_LIB) -Wl,--output-def,$(READLINE_DLL_EXP_DEF) -Wl,-s
++	LIB /MACHINE:X86 /NAME:$@ /DEF:$(READLINE_DLL_EXP_DEF) /OUT:$(READLINE_MSC_DLL_EXP_LIB)
++
++$(SHARED_HISTORY):	$(SHARED_HISTOBJ) xmalloc.so history-dllversion.so
++	$(RM) $@
++	$(CC) --shared $(SHARED_HISTOBJ) xmalloc.so history-dllversion.so \
++	 -o $@ -Wl,--out-implib,$(HISTORY_GCC_DLL_EXP_LIB) -Wl,--output-def,$(HISTORY_DLL_EXP_DEF) -Wl,-s
++	LIB /MACHINE:X86 /NAME:$@ /DEF:$(HISTORY_DLL_EXP_DEF) /OUT:$(HISTORY_MSC_DLL_EXP_LIB)
++else
+ $(SHARED_READLINE):	$(SHARED_OBJ)
+ 	$(RM) $@
+ 	$(SHOBJ_LD) ${SHOBJ_LDFLAGS} ${SHLIB_XLDFLAGS} -o $@ $(SHARED_OBJ) $(SHLIB_LIBS)
+@@ -169,6 +205,7 @@ $(SHARED_READLINE):	$(SHARED_OBJ)
+ $(SHARED_HISTORY):	$(SHARED_HISTOBJ) xmalloc.so
+ 	$(RM) $@
+ 	$(SHOBJ_LD) ${SHOBJ_LDFLAGS} ${SHLIB_XLDFLAGS} -o $@ $(SHARED_HISTOBJ) xmalloc.so $(SHLIB_LIBS)
++endif
+ 
+ # Since tilde.c is shared between readline and bash, make sure we compile 
+ # it with the right flags when it's built as part of readline
+diff -ipuwr readline-5.2-orig/signals.c readline-5.2-src/signals.c
+--- readline-5.2-orig/signals.c	2005-12-24 03:46:44.000000000 +0100
++++ readline-5.2-src/signals.c	2006-11-12 11:37:43.515625000 +0100
+@@ -77,8 +77,10 @@ typedef struct { SigHandler *sa_handler;
+ #  define SA_RESTART 0
+ #endif
+ 
++#if !defined (_WIN32)
+ static SigHandler *rl_set_sighandler PARAMS((int, SigHandler *, sighandler_cxt *));
+ static void rl_maybe_set_sighandler PARAMS((int, SigHandler *, sighandler_cxt *));
++#endif
+ 
+ /* Exported variables for use by applications. */
+ 
+@@ -94,8 +96,11 @@ int rl_catch_sigwinch = 0;	/* for the re
+ #endif
+ 
+ static int signals_set_flag;
++#ifdef SIGWINCH
+ static int sigwinch_set_flag;
++#endif
+ 
++#if !defined (_WIN32)
+ /* **************************************************************** */
+ /*					        		    */
+ /*			   Signal Handling                          */
+@@ -421,6 +426,7 @@ rl_clear_signals ()
+ 
+   return 0;
+ }
++#endif /* !_WIN32 */
+ 
+ /* Clean up the terminal and readline state after catching a signal, before
+    resending it to the calling application. */
+@@ -463,4 +469,50 @@ rl_free_line_state ()
+   _rl_reset_argument ();
+ }
+ 
++#if defined (_WIN32)
++
++#include <windows.h>
++#include <signal.h>
++#include <stdio.h>
++
++/* Handling of CTRL_C_EVENT, CTRL_CLOSE_EVENT, CTRL_BREAK_EVENT, 
++ * CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT,
++ * WINDOW_BUFFER_SIZE_EVENTs are handled separately see input.c
++ */
++
++BOOL CtrlEventHandler(DWORD dwEventType)
++{
++  if (dwEventType == CTRL_C_EVENT)
++    rl_free_line_state ();
++  rl_cleanup_after_signal ();
++  if (dwEventType == CTRL_C_EVENT)	/* special treatment */
++    {
++      if (rl_catch_signals == 1)	/* > 1: handled only locally */
++	{
++	  raise(SIGINT);		/* pass to program signal hadler */
++	  rl_reset_after_signal();	/* on return goon */
++	}
++      return TRUE;			/* don't pass to upstream handlers */
++    }
++  return FALSE; 			/* pass other events to handler chain */
++}
++
++int
++rl_set_signals ()
++{
++  if (rl_catch_signals && signals_set_flag == 0)
++    signals_set_flag = SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlEventHandler, TRUE);
++  return signals_set_flag;
++}
++
++int
++rl_clear_signals ()
++{
++  if ( signals_set_flag )
++    if ( SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlEventHandler, FALSE) )
++      signals_set_flag = 0;
++  return signals_set_flag;
++}
++
++#endif	/* _WIN32  */
+ #endif  /* HANDLE_SIGNALS */
+diff -ipuwr readline-5.2-orig/terminal.c readline-5.2-src/terminal.c
+--- readline-5.2-orig/terminal.c	2006-09-28 17:11:10.000000000 +0200
++++ readline-5.2-src/terminal.c	2006-11-12 11:37:43.531250000 +0100
+@@ -51,9 +51,21 @@
+ /* System-specific feature definitions and include files. */
+ #include "rldefs.h"
+ 
++#if defined (_WIN32)
++# include <windows.h>
++extern int haveConsole;	/* imported from rltty.c  */
++extern HANDLE hStdout, hStdin;
++extern COORD	rlScreenEnd;
++extern int	rlScreenMax;
++#else /* !_WIN32 */
+ #if defined (GWINSZ_IN_SYS_IOCTL) && !defined (TIOCGWINSZ)
+ #  include <sys/ioctl.h>
+ #endif /* GWINSZ_IN_SYS_IOCTL && !TIOCGWINSZ */
++#endif /* !_WIN32 */
++
++#ifdef __MSDOS__
++# include <pc.h>
++#endif
+ 
+ #include "rltty.h"
+ #include "tcap.h"
+@@ -91,9 +103,14 @@ int rl_prefer_env_winsize = 0;
+ /*								    */
+ /* **************************************************************** */
+ 
++#if !defined (__MSDOS__) && !defined (_WIN32)
+ static char *term_buffer = (char *)NULL;
+ static char *term_string_buffer = (char *)NULL;
+ 
++/* Non-zero means this terminal can't really do anything. */
++static int dumb_term;
++#endif /* !__MSDOS__ && !_WIN32 */
++
+ static int tcap_initialized;
+ 
+ #if !defined (__linux__)
+@@ -220,6 +237,7 @@ _win_get_screensize (swp, shp)
+    to the terminal.  If IGNORE_ENV is true, we do not pay attention to the
+    values of $LINES and $COLUMNS.  The tests for TERM_STRING_BUFFER being
+    non-null serve to check whether or not we have initialized termcap. */
++#if !defined (_WIN32)
+ void
+ _rl_get_screen_size (tty, ignore_env)
+      int tty, ignore_env;
+@@ -264,7 +282,10 @@ _rl_get_screen_size (tty, ignore_env)
+       if (_rl_screenwidth <= 0)
+         _rl_screenwidth = wc;
+ 
+-#if !defined (__DJGPP__)
++#if defined (__DJGPP__)
++      if (_rl_screenwidth <= 0)
++	_rl_screenwidth = ScreenCols ();
++#else
+       if (_rl_screenwidth <= 0 && term_string_buffer)
+ 	_rl_screenwidth = tgetnum ("co");
+ #endif
+@@ -280,7 +301,10 @@ _rl_get_screen_size (tty, ignore_env)
+       if (_rl_screenheight <= 0)
+         _rl_screenheight = wr;
+ 
+-#if !defined (__DJGPP__)
++#if defined (__DJGPP__)
++      if (_rl_screenheight <= 0)
++	_rl_screenheight = ScreenRows ();
++#else
+       if (_rl_screenheight <= 0 && term_string_buffer)
+ 	_rl_screenheight = tgetnum ("li");
+ #endif
+@@ -304,6 +328,29 @@ _rl_get_screen_size (tty, ignore_env)
+   _rl_screenchars = _rl_screenwidth * _rl_screenheight;
+ }
+ 
++#else	/* _WIN32*/
++
++void
++_rl_get_screen_size (tty, ignore_env)
++     int tty, ignore_env;
++{
++  CONSOLE_SCREEN_BUFFER_INFO	csbi;
++  
++  if ( (haveConsole & FOR_OUTPUT) &&
++       GetConsoleScreenBufferInfo(hStdout, &csbi) )
++    {
++      _rl_screenwidth = csbi.dwSize.X;
++      _rl_screenheight = csbi.dwSize.Y;
++    }
++  else
++    {
++      _rl_screenwidth = 80;
++      _rl_screenheight = 24;
++    }
++  _rl_screenchars = _rl_screenwidth * _rl_screenheight;
++}
++#endif	/* _WIN32  */
++
+ void
+ _rl_set_screen_size (rows, cols)
+      int rows, cols;
+@@ -360,6 +407,7 @@ rl_resize_terminal ()
+     }
+ }
+ 
++#if !defined (_WIN32)
+ struct _tc_string {
+      const char *tc_var;
+      char **tc_value;
+@@ -416,11 +464,37 @@ get_term_capabilities (bp)
+ #endif
+   tcap_initialized = 1;
+ }
++#endif /* !_WIN32 */
+ 
+ int
+ _rl_init_terminal_io (terminal_name)
+      const char *terminal_name;
+ {
++#if defined (_WIN32)
++  _rl_term_cr = "\r";						/* any value != 0  */
++  _rl_term_im = _rl_term_ei = _rl_term_ic = _rl_term_IC = (char *)NULL;	/* !! we emulate insertion  */
++  _rl_term_up = "y";						/* any value != 0  */
++  _rl_term_dc = _rl_term_DC =  (char *)NULL;			/* !! we emulate deletion  */
++  _rl_visible_bell = (char *)NULL;
++ 
++  _rl_get_screen_size (0, 1);
++   
++  /* Let Windows handle meta keys!  */
++  term_has_meta = 0;
++  _rl_term_mm = _rl_term_mo = (char *)NULL;
++ 
++  /* It probably has arrow keys, but I don't know what they are. */
++  _rl_term_ku = _rl_term_kd = _rl_term_kr = _rl_term_kl = (char *)NULL;
++  
++#if defined (HACK_TERMCAP_MOTION)
++  _rl_term_forward_char = (char *)NULL;
++#endif /* HACK_TERMCAP_MOTION */
++ 
++  _rl_terminal_can_insert = 0;
++  _rl_term_autowrap = 1;
++
++#else /* !_WIN32 */
++
+   const char *term;
+   char *buffer;
+   int tty, tgetent_ret;
+@@ -432,6 +506,23 @@ _rl_init_terminal_io (terminal_name)
+   if (term == 0)
+     term = "dumb";
+ 
++#ifdef __MSDOS__
++  _rl_term_im = _rl_term_ei = _rl_term_ic = _rl_term_IC = (char *)NULL;
++  _rl_term_up = _rl_term_dc = _rl_term_DC = _rl_visible_bell = (char *)NULL;
++  _rl_term_ku = _rl_term_kd = _rl_term_kl = _rl_term_kr = (char *)NULL;
++  _rl_term_mm = _rl_term_mo = (char *)NULL;
++  _rl_terminal_can_insert = term_has_meta = _rl_term_autowrap = 0;
++  _rl_term_cr = "\r";
++  _rl_term_clreol = _rl_term_clrpag = _rl_term_backspace = (char *)NULL;
++  _rl_term_goto = _rl_term_pc = _rl_term_ip = (char *)NULL;
++  _rl_term_ks = _rl_term_ke =_rl_term_vs = _rl_term_ve = (char *)NULL;
++  _rl_term_kh = _rl_term_kH = _rl_term_at7 = _rl_term_kI = (char *)NULL;
++#if defined(HACK_TERMCAP_MOTION)
++  _rl_term_forward_char = (char *)NULL;
++#endif
++
++  _rl_get_screen_size (tty, 0);
++#else  /* !__MSDOS__ */
+   /* I've separated this out for later work on not calling tgetent at all
+      if the calling application has supplied a custom redisplay function,
+      (and possibly if the application has supplied a custom input function). */
+@@ -532,6 +623,8 @@ _rl_init_terminal_io (terminal_name)
+   if (!term_has_meta)
+     _rl_term_mm = _rl_term_mo = (char *)NULL;
+ 
++#endif /* !__MSDOS__ */
++
+   /* Attempt to find and bind the arrow keys.  Do not override already
+      bound keys in an overzealous attempt, however. */
+ 
+@@ -542,9 +635,12 @@ _rl_init_terminal_io (terminal_name)
+   bind_termcap_arrow_keys (vi_insertion_keymap);
+ #endif /* VI_MODE */
+ 
++#endif /* !_WIN32 */
++  
+   return 0;
+ }
+ 
++#if !defined (_WIN32)
+ /* Bind the arrow key sequences from the termcap description in MAP. */
+ static void
+ bind_termcap_arrow_keys (map)
+@@ -583,6 +679,7 @@ rl_get_termcap (cap)
+     }
+   return ((char *)NULL);
+ }
++#endif /* !_WIN32 */
+ 
+ /* Re-initialize the terminal considering that the TERM/TERMCAP variable
+    has changed. */
+@@ -595,6 +692,7 @@ rl_reset_terminal (terminal_name)
+   return 0;
+ }
+ 
++#if !defined (_WIN32)
+ /* A function for the use of tputs () */
+ #ifdef _MINIX
+ void
+@@ -628,10 +726,12 @@ _rl_backspace (count)
+ {
+   register int i;
+ 
++#ifndef __MSDOS__
+   if (_rl_term_backspace)
+     for (i = 0; i < count; i++)
+       tputs (_rl_term_backspace, 1, _rl_output_character_function);
+   else
++#endif
+     for (i = 0; i < count; i++)
+       putc ('\b', _rl_out_stream);
+   return 0;
+@@ -661,11 +761,16 @@ rl_ding ()
+ 	default:
+ 	  break;
+ 	case VISIBLE_BELL:
++#ifdef __MSDOS__
++	  ScreenVisualBell ();
++	  break;
++#else
+ 	  if (_rl_visible_bell)
+ 	    {
+ 	      tputs (_rl_visible_bell, 1, _rl_output_character_function);
+ 	      break;
+ 	    }
++#endif
+ 	  /* FALLTHROUGH */
+ 	case AUDIBLE_BELL:
+ 	  fprintf (stderr, "\007");
+@@ -677,6 +782,80 @@ rl_ding ()
+   return (-1);
+ }
+ 
++#else	/* _WIN32 */
++
++/* Write COUNT characters from STRING to the output stream. */
++void
++_rl_output_some_chars (string, count)
++     const char *string;
++     int count;
++{
++  CONSOLE_SCREEN_BUFFER_INFO	csbi;
++  fwrite (string, 1, count, _rl_out_stream);
++  if ( (haveConsole & FOR_OUTPUT) && GetConsoleScreenBufferInfo(hStdout, &csbi) )
++    {
++      int linear_pos = (int)csbi.dwCursorPosition.Y * (int)csbi.dwSize.X
++			+ (int)csbi.dwCursorPosition.X;
++      if (linear_pos > rlScreenMax)
++        {
++          rlScreenEnd = csbi.dwCursorPosition;
++          rlScreenMax = linear_pos;
++        }
++    }
++}
++
++/* This is used to collect all putc output */
++int
++_rl_output_character_function (c)
++     int c;
++{
++  _rl_output_some_chars ((char *)&c, 1);
++  return 1;
++}
++
++/* Move the cursor back. */
++int
++_rl_backspace (count)
++     int count;
++{
++  CONSOLE_SCREEN_BUFFER_INFO	csbi;
++
++  if ( (haveConsole & FOR_OUTPUT) && GetConsoleScreenBufferInfo(hStdout, &csbi) )
++    {
++      while (count > csbi.dwCursorPosition.X)
++        {
++          --csbi.dwCursorPosition.Y;
++          count -= csbi.dwCursorPosition.X + 1;
++          csbi.dwCursorPosition.X = csbi.dwSize.X - 1;
++        }
++      csbi.dwCursorPosition.X -= count;
++      SetConsoleCursorPosition(hStdout, csbi.dwCursorPosition);
++    }
++  return 0;
++}
++
++/* Move to the start of the next line. */
++int
++rl_crlf ()
++{
++  _rl_output_some_chars ("\n", 1);
++  return 0;
++}
++
++/* Ring the terminal bell. */
++int
++rl_ding ()
++{
++  if (readline_echoing_p)
++    {
++      if (_rl_bell_preference != NO_BELL)
++	MessageBeep(MB_OK);
++      return (0);
++    }
++  return (-1);
++}
++#endif	/* _WIN32 */
++
+ /* **************************************************************** */
+ /*								    */
+ /*	 	Controlling the Meta Key and Keypad		    */
+@@ -686,7 +865,7 @@ rl_ding ()
+ void
+ _rl_enable_meta_key ()
+ {
+-#if !defined (__DJGPP__)
++#if !defined (__DJGPP__) && !defined (_WIN32)
+   if (term_has_meta && _rl_term_mm)
+     tputs (_rl_term_mm, 1, _rl_output_character_function);
+ #endif
+@@ -696,7 +875,7 @@ void
+ _rl_control_keypad (on)
+      int on;
+ {
+-#if !defined (__DJGPP__)
++#if !defined (__DJGPP__) && !defined (_WIN32)
+   if (on && _rl_term_ks)
+     tputs (_rl_term_ks, 1, _rl_output_character_function);
+   else if (!on && _rl_term_ke)
+@@ -718,6 +897,7 @@ void
+ _rl_set_cursor (im, force)
+      int im, force;
+ {
++#if !defined (__MSDOS__) && !defined (_WIN32)
+   if (_rl_term_ve && _rl_term_vs)
+     {
+       if (force || im != rl_insert_mode)
+@@ -728,4 +908,5 @@ _rl_set_cursor (im, force)
+ 	    tputs (_rl_term_ve, 1, _rl_output_character_function);
+ 	}
+     }
++#endif
+ }
+diff -ipuwr readline-5.2-orig/tilde.c readline-5.2-src/tilde.c
+--- readline-5.2-orig/tilde.c	2006-04-11 18:19:32.000000000 +0200
++++ readline-5.2-src/tilde.c	2006-11-12 11:37:43.531250000 +0100
+@@ -18,6 +18,7 @@
+    You should have received a copy of the GNU General Public License
+    along with Readline; see the file COPYING.  If not, write to the Free
+    Software Foundation, 59 Temple Place, Suite 330, Boston, MA 02111 USA. */
++#define READLINE_LIBRARY
+ 
+ #if defined (HAVE_CONFIG_H)
+ #  include <config.h>
+@@ -47,6 +48,10 @@
+ #include <pwd.h>
+ #endif
+ 
++#if defined (_WIN32)
++#include <windows.h>
++#endif
++
+ #include "tilde.h"
+ 
+ #if defined (TEST) || defined (STATIC_MALLOC)
+@@ -345,7 +350,12 @@ tilde_expand_word (filename)
+ {
+   char *dirname, *expansion, *username;
+   int user_len;
++#if !defined (_WIN32)
+   struct passwd *user_entry;
++#else /* _WIN32 */
++  char UserName[256];
++  unsigned long UserLen = 256;
++#endif /* _WIN32 */
+ 
+   if (filename == 0)
+     return ((char *)NULL);
+@@ -386,6 +396,7 @@ tilde_expand_word (filename)
+   /* No preexpansion hook, or the preexpansion hook failed.  Look in the
+      password database. */
+   dirname = (char *)NULL;
++#if !defined (_WIN32)
+ #if defined (HAVE_GETPWNAM)
+   user_entry = getpwnam (username);
+ #else
+@@ -418,6 +429,16 @@ tilde_expand_word (filename)
+ #if defined (HAVE_GETPWENT)
+   endpwent ();
+ #endif
++#else /* _WIN32 */
++  if (GetUserName (UserName, &UserLen))
++    {
++      if (!stricmp (username, UserName))
++	dirname = glue_prefix_and_suffix (sh_get_home_dir (), filename, user_len);
++      else if (dirname == 0)
++	dirname = savestring (filename);
++    }
++  free (username);
++#endif /* _WIN32 */
+   return (dirname);
+ }
+ 
+diff -ipuwr readline-5.2-orig/tilde.h readline-5.2-src/tilde.h
+--- readline-5.2-orig/tilde.h	2004-09-24 20:03:06.000000000 +0200
++++ readline-5.2-src/tilde.h	2006-11-12 11:37:43.531250000 +0100
+@@ -24,6 +24,12 @@
+ #if !defined (_TILDE_H_)
+ #  define _TILDE_H_
+ 
++#if defined READLINE_LIBRARY
++# include "rlstdc.h"
++#else
++# include <readline/rlstdc.h>
++#endif
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -46,33 +52,33 @@ typedef char *tilde_hook_func_t PARAMS((
+    wants called before trying the standard tilde expansions.  The function
+    is called with the text sans tilde, and returns a malloc()'ed string
+    which is the expansion, or a NULL pointer if the expansion fails. */
+-extern tilde_hook_func_t *tilde_expansion_preexpansion_hook;
++READLINE_DLL_IMPEXP tilde_hook_func_t *tilde_expansion_preexpansion_hook;
+ 
+ /* If non-null, this contains the address of a function to call if the
+    standard meaning for expanding a tilde fails.  The function is called
+    with the text (sans tilde, as in "foo"), and returns a malloc()'ed string
+    which is the expansion, or a NULL pointer if there is no expansion. */
+-extern tilde_hook_func_t *tilde_expansion_failure_hook;
++READLINE_DLL_IMPEXP tilde_hook_func_t *tilde_expansion_failure_hook;
+ 
+ /* When non-null, this is a NULL terminated array of strings which
+    are duplicates for a tilde prefix.  Bash uses this to expand
+    `=~' and `:~'. */
+-extern char **tilde_additional_prefixes;
++READLINE_DLL_IMPEXP char **tilde_additional_prefixes;
+ 
+ /* When non-null, this is a NULL terminated array of strings which match
+    the end of a username, instead of just "/".  Bash sets this to
+    `:' and `=~'. */
+-extern char **tilde_additional_suffixes;
++READLINE_DLL_IMPEXP char **tilde_additional_suffixes;
+ 
+ /* Return a new string which is the result of tilde expanding STRING. */
+-extern char *tilde_expand PARAMS((const char *));
++READLINE_DLL_IMPEXP char *tilde_expand PARAMS((const char *));
+ 
+ /* Do the work of tilde expansion on FILENAME.  FILENAME starts with a
+    tilde.  If there is no expansion, call tilde_expansion_failure_hook. */
+-extern char *tilde_expand_word PARAMS((const char *));
++READLINE_DLL_IMPEXP char *tilde_expand_word PARAMS((const char *));
+ 
+ /* Find the portion of the string beginning with ~ that should be expanded. */
+-extern char *tilde_find_word PARAMS((const char *, int, int *));
++READLINE_DLL_IMPEXP char *tilde_find_word PARAMS((const char *, int, int *));
+ 
+ #ifdef __cplusplus
+ }
+diff -ipuwr readline-5.2-orig/util.c readline-5.2-src/util.c
+--- readline-5.2-orig/util.c	2005-05-16 06:28:02.000000000 +0200
++++ readline-5.2-src/util.c	2006-11-12 11:37:43.546875000 +0100
+@@ -275,7 +275,7 @@ _rl_strpbrk (string1, string2)
+ }
+ #endif
+ 
+-#if !defined (HAVE_STRCASECMP)
++#if !defined (HAVE_STRCASECMP) && !defined (_WIN32)
+ /* Compare at most COUNT characters from string1 to string2.  Case
+    doesn't matter. */
+ int
+@@ -313,7 +313,7 @@ _rl_stricmp (string1, string2)
+     }
+   return (*string1 - *string2);
+ }
+-#endif /* !HAVE_STRCASECMP */
++#endif /* !HAVE_STRCASECMP && !_WIN32 */
+ 
+ /* Stupid comparison routine for qsort () ing strings. */
+ int

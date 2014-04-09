@@ -1,0 +1,48 @@
+﻿  xmalloc.c
+  vi_mode.c
+  util.c
+  undo.c
+  tilde.c
+  text.c
+  terminal.c
+  signals.c
+  shell.c
+  search.c
+  rltty.c
+  readline.c
+  parens.c
+  nls.c
+  misc.c
+  mbutil.c
+  macro.c
+  kill.c
+  keymaps.c
+  isearch.c
+  Generating Code...
+  Compiling...
+  input.c
+  histsearch.c
+  history.c
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\history.c(411): warning C4047: '==' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\history.c(412): warning C4047: '=' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\history.c(422): warning C4047: '==' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\history.c(426): warning C4047: '=' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\history.c(432): warning C4047: '=' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+  histfile.c
+  histexpand.c
+  funmap.c
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\funmap.c(255): warning C4090: 'function' : different 'const' qualifiers
+  display.c
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\display.c(249): warning C4101: 'ind' : unreferenced local variable
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\display.c(249): warning C4101: 'pind' : unreferenced local variable
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\display.c(479): warning C4101: 'num' : unreferenced local variable
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\display.c(479): warning C4101: 'n0' : unreferenced local variable
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\display.c(646): warning C4101: 'z' : unreferenced local variable
+  complete.c
+  callback.c
+  bind.c
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\bind.c(1859): warning C4090: 'function' : different 'const' qualifiers
+  Generating Code...
+C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V120\Microsoft.CppBuild.targets(1354,5): warning MSB8012: TargetPath(C:\work\tg\3rdParty\readline\5.2\readline-5.2\msvc\../lib\readline.lib) does not match the Library's OutputFile property value (C:\work\tg\3rdParty\readline\5.2\readline-5.2\lib\readlineD.lib). This may cause your project to build incorrectly. To correct this, please make sure that $(OutDir), $(TargetName) and $(TargetExt) property values match the value specified in %(Lib.OutputFile).
+C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V120\Microsoft.CppBuild.targets(1356,5): warning MSB8012: TargetName(readline) does not match the Library's OutputFile property value (readlineD). This may cause your project to build incorrectly. To correct this, please make sure that $(OutDir), $(TargetName) and $(TargetExt) property values match the value specified in %(Lib.OutputFile).
+  readline.vcxproj -> C:\work\tg\3rdParty\readline\5.2\readline-5.2\msvc\../lib\readline.lib

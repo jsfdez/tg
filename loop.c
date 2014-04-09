@@ -37,8 +37,12 @@
 #endif
 
 #include <errno.h>
+#ifndef _WIN32
 #include <poll.h>
 #include <unistd.h>
+#else
+#include "wincompat.h"
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -67,7 +71,7 @@ extern int safe_quit;
 extern int queries_num;
 
 int unread_messages;
-void got_it (char *line, int len);
+void got_it (char *line, size_t len);
 void net_loop (int flags, int (*is_end)(void)) {
   while (!is_end ()) {
     struct pollfd fds[101];
@@ -82,7 +86,7 @@ void net_loop (int flags, int (*is_end)(void)) {
     int x = connections_make_poll_array (fds + cc, 101 - cc) + cc;
     double timer = next_timer_in ();
     if (timer > 1000) { timer = 1000; }
-    if (poll (fds, x, timer) < 0) {
+    if (poll (fds, x, (int)timer) < 0) {
       work_timers ();
       continue;
     }
@@ -118,7 +122,7 @@ char **_s;
 size_t *_l;
 int got_it_ok;
 
-void got_it (char *line, int len) {
+void got_it (char *line, size_t len) {
   assert (len > 0);
   line[-- len] = 0; // delete end of line
   *_s = line;
@@ -161,7 +165,7 @@ int zero[512];
 
 void write_dc (int auth_file_fd, struct dc *DC) {
   assert (write (auth_file_fd, &DC->port, 4) == 4);
-  int l = strlen (DC->ip);
+  int l = (int)strlen (DC->ip);
   assert (write (auth_file_fd, &l, 4) == 4);
   assert (write (auth_file_fd, DC->ip, l) == l);
   if (DC->flags & 1) {
@@ -178,7 +182,11 @@ void write_dc (int auth_file_fd, struct dc *DC) {
 int our_id;
 void write_auth_file (void) {
   if (binlog_enabled) { return; }
+#ifdef _WIN32
+	int auth_file_fd = open (get_auth_key_filename (), O_CREAT | O_RDWR | O_BINARY, 0600);
+#else
   int auth_file_fd = open (get_auth_key_filename (), O_CREAT | O_RDWR, 0600);
+#endif
   assert (auth_file_fd >= 0);
   int x = DC_SERIALIZED_MAGIC_V2;
   assert (write (auth_file_fd, &x, 4) == 4);
@@ -203,7 +211,7 @@ void write_auth_file (void) {
 
 void read_dc (int auth_file_fd, int id, unsigned ver) {
   int port = 0;
-  assert (read (auth_file_fd, &port, 4) == 4);
+  assert (read ((int)auth_file_fd, &port, 4) == 4);
   int l = 0;
   assert (read (auth_file_fd, &l, 4) == 4);
   assert (l >= 0);
@@ -234,7 +242,11 @@ void empty_auth_file (void) {
 int need_dc_list_update;
 void read_auth_file (void) {
   if (binlog_enabled) { return; }
+#ifdef _WIN32
+	int auth_file_fd = open (get_auth_key_filename (), O_CREAT | O_RDWR | O_BINARY, 0600);
+#else
   int auth_file_fd = open (get_auth_key_filename (), O_CREAT | O_RDWR, 0600);
+#endif
   if (auth_file_fd < 0) {
     empty_auth_file ();
   }
@@ -246,6 +258,7 @@ void read_auth_file (void) {
     empty_auth_file ();
     return;
   }
+
   assert (read (auth_file_fd, &x, 4) == 4);
   assert (x <= MAX_DC_ID);
   assert (read (auth_file_fd, &dc_working_num, 4) == 4);
@@ -409,7 +422,7 @@ void write_secret_chat_file (void) {
       assert (write (fd, &t, 4) == 4);
       t = Peers[i]->flags;
       assert (write (fd, &t, 4) == 4);
-      t = strlen (Peers[i]->print_name);
+      t = (int)strlen (Peers[i]->print_name);
       assert (write (fd, &t, 4) == 4);
       assert (write (fd, Peers[i]->print_name, t) == t);
       

@@ -22,12 +22,18 @@
 #endif
 
 #include <stdio.h>
+#ifndef _WIN32
 #include <unistd.h>
+#else
+#include "wincompat.h"
+#endif
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <pwd.h>
 #include <termios.h>
 #include <unistd.h>
+#endif
 #include <assert.h>
 #if (READLINE == GNU)
 #include <readline/readline.h>
@@ -100,6 +106,7 @@ void set_default_username (const char *s) {
 
 
 /* {{{ TERMINAL */
+#ifndef _WIN32
 static struct termios term_in, term_out;
 static int term_set_in;
 static int term_set_out;
@@ -128,8 +135,10 @@ void set_terminal_attributes (void) {
   }
 }
 /* }}} */
+#endif
 
 char *get_home_directory (void) {
+#ifndef _WIN32
   static char *home_directory = NULL;
   if (home_directory != NULL) {
     return home_directory;
@@ -149,11 +158,20 @@ char *get_home_directory (void) {
     home_directory = tstrdup (".");
   }
   return home_directory;
+#else
+	char path[MAX_PATH];
+	SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, path);
+	return tstrdup(path);
+#endif
 }
 
 char *get_config_directory (void) {
   char *config_directory;
+#ifdef _WIN32
+	tasprintf (&config_directory, "%s\\" CONFIG_DIRECTORY, get_home_directory ());
+#else
   tasprintf (&config_directory, "%s/" CONFIG_DIRECTORY, get_home_directory ());
+#endif
   return config_directory;
 }
 
@@ -182,7 +200,11 @@ char *get_binlog_file_name (void) {
 }
 
 char *make_full_path (char *s) {
+#ifdef _WIN32
+	if (*s != '\\') {
+#else
   if (*s != '/') {
+#endif
     char *t = s;
     tasprintf (&s, "%s/%s", get_home_directory (), s);
     tfree_str (t);
@@ -206,8 +228,12 @@ void running_for_first_time (void) {
   if (config_filename) {
     return; // Do not create custom config file
   }
+#ifdef _WIN32
+	tasprintf (&config_filename, "%s\\%s\\%s", get_home_directory (), CONFIG_DIRECTORY, CONFIG_FILE);
+#else
   tasprintf (&config_filename, "%s/%s/%s", get_home_directory (), CONFIG_DIRECTORY, CONFIG_FILE);
-  config_filename = make_full_path (config_filename);
+	config_filename = make_full_path (config_filename);
+#endif
 
   int config_file_fd;
   char *config_directory = get_config_directory ();
@@ -227,7 +253,7 @@ void running_for_first_time (void) {
       perror ("open[config_file]");
       exit (EXIT_FAILURE);
     }
-    if (write (config_file_fd, DEFAULT_CONFIG_CONTENTS, strlen (DEFAULT_CONFIG_CONTENTS)) <= 0) {
+    if (write (config_file_fd, DEFAULT_CONFIG_CONTENTS, (unsigned int)strlen (DEFAULT_CONFIG_CONTENTS)) <= 0) {
       perror ("write[config_file]");
       exit (EXIT_FAILURE);
     }
@@ -332,11 +358,16 @@ void parse_config (void) {
 #else
 void parse_config (void) {
   printf ("libconfig not enabled\n");
-  tasprintf (&auth_file_name, "%s/%s/%s", get_home_directory (), CONFIG_DIRECTORY, AUTH_KEY_FILE);
-  tasprintf (&state_file_name, "%s/%s/%s", get_home_directory (), CONFIG_DIRECTORY, STATE_FILE);
-  tasprintf (&secret_chat_file_name, "%s/%s/%s", get_home_directory (), CONFIG_DIRECTORY, SECRET_CHAT_FILE);
-  tasprintf (&downloads_directory, "%s/%s/%s", get_home_directory (), CONFIG_DIRECTORY, DOWNLOADS_DIRECTORY);
-  tasprintf (&binlog_file_name, "%s/%s/%s", get_home_directory (), CONFIG_DIRECTORY, BINLOG_FILE);
+#ifdef _WIN32
+	const char* format = "%s\\%s\\%s";
+#else
+	const char* format = "%s/%s/%s";
+#endif
+  tasprintf (&auth_file_name, format, get_home_directory (), CONFIG_DIRECTORY, AUTH_KEY_FILE);
+  tasprintf (&state_file_name, format, get_home_directory (), CONFIG_DIRECTORY, STATE_FILE);
+  tasprintf (&secret_chat_file_name, format, get_home_directory (), CONFIG_DIRECTORY, SECRET_CHAT_FILE);
+  tasprintf (&downloads_directory, format, get_home_directory (), CONFIG_DIRECTORY, DOWNLOADS_DIRECTORY);
+  tasprintf (&binlog_file_name, format, get_home_directory (), CONFIG_DIRECTORY, BINLOG_FILE);
 }
 #endif
 
@@ -459,7 +490,11 @@ void print_backtrace (void) {
 #endif
 
 void sig_segv_handler (int signum __attribute__ ((unused))) {
+#ifndef _WIN32
   set_terminal_attributes ();
+#else
+  (void)signum;
+#endif
   if (write (1, "SIGSEGV received\n", 18) < 0) { 
     // Sad thing
   }
@@ -468,8 +503,13 @@ void sig_segv_handler (int signum __attribute__ ((unused))) {
 }
 
 void sig_abrt_handler (int signum __attribute__ ((unused))) {
-  set_terminal_attributes ();
-  if (write (1, "SIGABRT received\n", 18) < 0) { 
+#ifndef _WIN32
+	set_terminal_attributes();
+#else
+	(void)signum;
+#endif
+	if(write(1, "SIGABRT received\n", 18) < 0)
+	{
     // Sad thing
   }
   print_backtrace ();
@@ -493,7 +533,9 @@ int main (int argc, char **argv) {
   parse_config ();
 
 
+#ifndef _WIN32
   get_terminal_attributes ();
+#endif
 
   #ifdef USE_LUA
   if (lua_file) {

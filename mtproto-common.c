@@ -22,6 +22,8 @@
 #include "config.h"
 #endif
 
+#define WIN32_LEAN_AND_MEAN
+
 #define	_FILE_OFFSET_BITS	64
 
 #include <assert.h>
@@ -31,12 +33,18 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#ifndef _WIN32
 #include <netdb.h>
+#endif
 #include <openssl/bn.h>
 #include <openssl/rand.h>
 #include <openssl/pem.h>
 #include <openssl/aes.h>
 #include <openssl/sha.h>
+
+#ifdef _WIN32
+#include "wincompat.h"
+#endif
 
 #include "mtproto-common.h"
 #include "interface.h"
@@ -57,10 +65,13 @@ BN_CTX *BN_ctx;
 int verbosity;
 
 int get_random_bytes (unsigned char *buf, int n) {
+#ifndef _WIN32
   int r = 0, h = open ("/dev/random", O_RDONLY | O_NONBLOCK);
   if (h >= 0) {
-    r = read (h, buf, n);
-    if (r > 0) {
+		r = read (h, buf, n);
+		if(r > 0)
+	{
+		{
       if (verbosity >= 3) {
         logprintf ( "added %d bytes of real entropy to secure random numbers seed\n", r);
       }
@@ -88,6 +99,10 @@ int get_random_bytes (unsigned char *buf, int n) {
   }
 
   return r;
+#endif
+	HCRYPTPROV hCryptProv = 0;
+	CryptGenRandom (hCryptProv, n, buf);
+	return n;
 }
 
 void my_clock_gettime (int clock_id UU, struct timespec *T) {
@@ -100,6 +115,9 @@ void my_clock_gettime (int clock_id UU, struct timespec *T) {
   mach_port_deallocate(mach_task_self(), cclock);
   T->tv_sec = mts.tv_sec;
   T->tv_nsec = mts.tv_nsec;
+#elif _WIN32
+	_CRT_UNUSED (clock_id);
+	GetSystemTime((LPSYSTEMTIME)T);
 #else
   assert (clock_gettime(clock_id, T) >= 0);
 #endif
@@ -119,6 +137,24 @@ static __inline__ unsigned long long rdtsc (void) {
   unsigned hi, lo;
   __asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
   return ((unsigned long long) lo) | (((unsigned long long) hi) << 32);
+}
+#endif
+
+#ifdef _WIN32
+#include <TlHelp32.h>
+
+unsigned short getppid () {
+	unsigned short ret = 0;
+	PROCESSENTRY32 data;
+	data.dwSize = sizeof(PROCESSENTRY32);
+	HANDLE handle = CreateToolhelp32Snapshot (TH32CS_SNAPPROCESS, (DWORD)_getpid());
+	if(handle != INVALID_HANDLE_VALUE) {
+		if(Process32First (handle, &data) == TRUE) {
+			ret = (unsigned short)data.th32ParentProcessID;
+		}
+		CloseHandle (handle);
+	}
+	return ret;
 }
 #endif
 
@@ -210,7 +246,7 @@ void out_cstring (const char *str, long len) {
   assert ((char *) packet_ptr + len + 8 < (char *) (packet_buffer + PACKET_BUFFER_SIZE));
   char *dest = (char *) packet_ptr;
   if (len < 254) {
-    *dest++ = len;
+    *dest++ = (char)len;
   } else {
     *packet_ptr = (len << 8) + 0xfe;
     dest += 4;
@@ -232,7 +268,7 @@ void out_cstring_careful (const char *str, long len) {
     if (dest != str) {
       memmove (dest, str, len);
     }
-    dest[-1] = len;
+    dest[-1] = (char)len;
   } else {
     dest += 4;
     if (dest != str) {

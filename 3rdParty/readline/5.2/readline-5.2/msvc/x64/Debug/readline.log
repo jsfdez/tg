@@ -1,0 +1,123 @@
+﻿  bind.c
+..\..\readline-5.2-src\bind.c(796): warning C4267: 'function' : conversion from 'size_t' to 'unsigned int', possible loss of data
+..\..\readline-5.2-src\bind.c(1362): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\bind.c(1397): warning C4267: 'initializing' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\bind.c(1859): warning C4090: 'function' : different 'const' qualifiers
+..\..\readline-5.2-src\bind.c(2170): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+  callback.c
+  complete.c
+..\..\readline-5.2-src\complete.c(742): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\complete.c(743): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\complete.c(1170): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\complete.c(1940): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\complete.c(2116): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\complete.c(2208): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\complete.c(2221): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+  display.c
+..\..\readline-5.2-src\display.c(256): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(262): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(266): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(287): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(249): warning C4101: 'ind' : unreferenced local variable
+..\..\readline-5.2-src\display.c(249): warning C4101: 'pind' : unreferenced local variable
+..\..\readline-5.2-src\display.c(402): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(421): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(556): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(567): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(479): warning C4101: 'num' : unreferenced local variable
+..\..\readline-5.2-src\display.c(479): warning C4101: 'n0' : unreferenced local variable
+..\..\readline-5.2-src\display.c(646): warning C4101: 'z' : unreferenced local variable
+..\..\readline-5.2-src\display.c(1348): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1349): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1451): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1491): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1493): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1516): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1518): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1622): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1624): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1666): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(1680): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(2026): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(2112): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(2122): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\display.c(2358): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+  funmap.c
+..\..\readline-5.2-src\funmap.c(255): warning C4090: 'function' : different 'const' qualifiers
+  histexpand.c
+..\..\readline-5.2-src\histexpand.c(733): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(762): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(820): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(827): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(871): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(957): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(1139): warning C4267: 'initializing' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(1152): warning C4267: 'initializing' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(1207): warning C4267: 'initializing' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(1383): warning C4267: '+=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histexpand.c(1390): warning C4267: '+=' : conversion from 'size_t' to 'int', possible loss of data
+  histfile.c
+..\..\readline-5.2-src\histfile.c(146): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histfile.c(227): warning C4267: 'function' : conversion from 'size_t' to 'unsigned int', possible loss of data
+..\..\readline-5.2-src\histfile.c(376): warning C4267: 'function' : conversion from 'size_t' to 'unsigned int', possible loss of data
+..\..\readline-5.2-src\histfile.c(415): warning C4244: 'function' : conversion from '__int64' to 'unsigned int', possible loss of data
+..\..\readline-5.2-src\histfile.c(483): warning C4267: '+=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histfile.c(484): warning C4267: '+=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histfile.c(517): warning C4267: '+=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histfile.c(521): warning C4267: '+=' : conversion from 'size_t' to 'int', possible loss of data
+  history.c
+..\..\readline-5.2-src\history.c(136): warning C4267: '+=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\history.c(411): warning C4047: '==' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+..\..\readline-5.2-src\history.c(412): warning C4047: '=' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+..\..\readline-5.2-src\history.c(422): warning C4047: '==' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+..\..\readline-5.2-src\history.c(426): warning C4047: '=' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+..\..\readline-5.2-src\history.c(432): warning C4047: '=' : 'histdata_t' differs in levels of indirection from 'histdata_t *'
+  histsearch.c
+..\..\readline-5.2-src\histsearch.c(89): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\histsearch.c(99): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+  input.c
+  isearch.c
+..\..\readline-5.2-src\isearch.c(162): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\isearch.c(252): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\isearch.c(288): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\isearch.c(561): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+  keymaps.c
+  kill.c
+..\..\readline-5.2-src\kill.c(534): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\kill.c(679): warning C4244: '=' : conversion from '__int64' to 'int', possible loss of data
+  macro.c
+  mbutil.c
+  misc.c
+  nls.c
+  parens.c
+  readline.c
+  rltty.c
+  Generating Code...
+  Compiling...
+  search.c
+  shell.c
+  signals.c
+  terminal.c
+  text.c
+..\..\readline-5.2-src\text.c(85): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\text.c(206): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\text.c(1178): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+  tilde.c
+..\..\readline-5.2-src\tilde.c(142): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\tilde.c(156): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\tilde.c(175): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\tilde.c(205): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\tilde.c(207): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\tilde.c(246): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\tilde.c(335): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+..\..\readline-5.2-src\tilde.c(336): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+  undo.c
+  util.c
+..\..\readline-5.2-src\util.c(237): warning C4267: '=' : conversion from 'size_t' to 'int', possible loss of data
+  vi_mode.c
+  xmalloc.c
+  Generating Code...
+c:\work\tg\3rdparty\readline\5.2\readline-5.2-src\vi_mode.c(1506): warning C4789: buffer 'mb' of size 1 bytes will be overrun; 1 bytes will be written starting at offset 1
+C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V120\Microsoft.CppBuild.targets(1354,5): warning MSB8012: TargetPath(C:\work\tg\3rdParty\readline\5.2\readline-5.2\msvc\x64\Debug\readline.lib) does not match the Library's OutputFile property value (C:\work\tg\3rdParty\readline\5.2\readline-5.2\msvc\x64\Debug\readlineD.lib). This may cause your project to build incorrectly. To correct this, please make sure that $(OutDir), $(TargetName) and $(TargetExt) property values match the value specified in %(Lib.OutputFile).
+C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V120\Microsoft.CppBuild.targets(1356,5): warning MSB8012: TargetName(readline) does not match the Library's OutputFile property value (readlineD). This may cause your project to build incorrectly. To correct this, please make sure that $(OutDir), $(TargetName) and $(TargetExt) property values match the value specified in %(Lib.OutputFile).
+  readline.vcxproj -> C:\work\tg\3rdParty\readline\5.2\readline-5.2\msvc\x64\Debug\readline.lib

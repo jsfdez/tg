@@ -19,7 +19,9 @@
 #ifndef __NET_H__
 #define __NET_H__
 
+#ifndef _WIN32
 #include <poll.h>
+#endif
 struct dc;
 #include "queries.h"
 #define TG_SERVER "173.240.5.1"

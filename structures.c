@@ -21,6 +21,8 @@
 #include "config.h"
 #endif
 
+#include "wincompat.h"
+
 #include <assert.h>
 #include <string.h>
 #include "structures.h"
@@ -44,8 +46,13 @@ DEFINE_TREE(message,struct message *,id_cmp,0)
 
 
 struct message message_list = {
-  .next_use = &message_list,
+#ifdef _WIN32
+	&message_list,
+	&message_list
+#else
+	.next_use = &message_list,
   .prev_use = &message_list
+#endif
 };
 
 struct tree_peer *peer_tree;
@@ -164,7 +171,7 @@ char *create_print_name (peer_id_t id, const char *a1, const char *a2, const cha
     s++;
   }
   s = buf;
-  int fl = strlen (s);
+  int fl = (int)strlen (s);
   int cc = 0;
   while (1) {
     peer_t *P = peer_lookup_name (s);
@@ -1321,7 +1328,7 @@ void fetch_geo_message (struct message *M) {
     fetch_message_action (&M->action);
   } else {
     M->message = fetch_str_dup ();
-    M->message_len = strlen (M->message);
+    M->message_len = (int)strlen (M->message);
     fetch_message_media (&M->media);
   }
 }

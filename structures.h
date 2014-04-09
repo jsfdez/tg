@@ -40,6 +40,10 @@ typedef struct { int type; int id; } peer_id_t;
 #define FLAG_ENCRYPTED 4096
 #define FLAG_PENDING 8192
 
+#ifdef _WIN32
+#define inline __inline
+#endif
+
 struct file_location {
   int dc;
   long long volume;

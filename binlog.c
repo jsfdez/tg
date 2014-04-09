@@ -24,10 +24,14 @@
 #ifdef USE_LUA
 # include "lua-tg.h"
 #endif
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <sys/file.h>
+#endif
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -35,6 +39,11 @@
 #include <string.h>
 #include <assert.h>
 #include <openssl/bn.h>
+
+#ifdef _WIN32
+#define BINLOG_IMPLEMENTATION
+#include "wincompat.h"
+#endif
 
 #include "binlog.h"
 #include "mtproto-common.h"
@@ -71,6 +80,9 @@ extern int messages_allocated;
 int in_replay_log;
 
 void *alloc_log_event (int l UU) {
+#ifdef _WIN32
+	_CRT_UNUSED (l);
+#endif
   return binlog_buffer;
 }
 
@@ -1192,12 +1204,12 @@ void replay_log (void) {
       if (wptr == rptr) {
         wptr = rptr = binlog_buffer;
       } else {
-        int x = wptr - rptr;
+        int x = (int)(wptr - rptr);
         memcpy (binlog_buffer, rptr, 4 * x);
         wptr -= (rptr - binlog_buffer);
         rptr = binlog_buffer;
       }
-      int l = (binlog_buffer + BINLOG_BUFFER_SIZE - wptr) * 4;
+      int l = (int)(binlog_buffer + BINLOG_BUFFER_SIZE - wptr) * 4;
       int k = read (fd, wptr, l);
       if (k < 0) {
         perror ("read binlog");
@@ -1223,8 +1235,12 @@ void write_binlog (void) {
     exit (2);
   }
   
-  assert (lseek (binlog_fd, binlog_pos, SEEK_SET) == binlog_pos);
+	assert (lseek (binlog_fd, (long)binlog_pos, SEEK_SET) == binlog_pos);
+#ifdef _WIN32
+	if (LockFile((HANDLE)_get_osfhandle(binlog_fd), 0, 0, 1, 0) == FALSE) {
+#else
   if (flock (binlog_fd, LOCK_EX | LOCK_NB) < 0) {
+#endif
     perror ("get lock");
     exit (2);
   } 
@@ -1281,7 +1297,7 @@ void bl_do_new_user (int id, const char *f, int fl, const char *l, int ll, long 
   out_long (access_token);
   out_cstring (p ? p : "", pl);
   out_int (contact);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_user_delete (struct user *U) {
@@ -1335,7 +1351,7 @@ void bl_do_set_user_profile_photo (struct user *U, long long photo_id, struct fi
       out_long (big->secret);
     }
     out_int (CODE_bool_false);
-    add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+    add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
   }
 }
 
@@ -1349,7 +1365,7 @@ void bl_do_set_user_name (struct user *U, const char *f, int fl, const char *l, 
   out_int (get_peer_id (U->id));
   out_cstring (f, fl);
   out_cstring (l, ll);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_set_user_access_token (struct user *U, long long access_token) {
@@ -1369,7 +1385,7 @@ void bl_do_set_user_phone (struct user *U, const char *p, int pl) {
   out_int (CODE_binlog_set_user_phone);
   out_int (get_peer_id (U->id));
   out_cstring (p, pl);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_set_user_friend (struct user *U, int friend) {
@@ -1392,7 +1408,7 @@ void bl_do_dc_option (int id, int l1, const char *name, int l2, const char *ip, 
   out_cstring (ip, l2);
   out_int (port);
 
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_dc_signed (int id) {
@@ -1437,7 +1453,7 @@ void bl_do_set_user_real_name (struct user *U, const char *f, int fl, const char
   out_int (get_peer_id (U->id));
   out_cstring (f, fl);
   out_cstring (l, ll);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_encr_chat_delete (struct secret_chat *U) {
@@ -1567,7 +1583,7 @@ void bl_do_create_chat (struct chat *C, int y, const char *s, int l, int users_n
   out_int (version);
   out_data (big, sizeof (struct file_location));
   out_data (small, sizeof (struct file_location));
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_chat_forbid (struct chat *C, int on) {
@@ -1596,7 +1612,7 @@ void bl_do_set_chat_title (struct chat *C, const char *s, int l) {
   out_int (CODE_binlog_set_chat_title);
   out_int (get_peer_id (C->id));
   out_cstring (s, l);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_set_chat_photo (struct chat *C, struct file_location *big, struct file_location *small) {
@@ -1607,7 +1623,7 @@ void bl_do_set_chat_photo (struct chat *C, struct file_location *big, struct fil
   out_int (get_peer_id (C->id));
   out_data (big, sizeof (struct file_location));
   out_data (small, sizeof (struct file_location));
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_set_chat_date (struct chat *C, int date) {
@@ -1709,7 +1725,7 @@ void bl_do_create_message_text (int msg_id, int from_id, int to_type, int to_id,
   out_int (to_id);
   out_int (date);
   out_cstring (s, l);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_send_message_text (long long msg_id, int from_id, int to_type, int to_id, int date, int l, const char *s) {
@@ -1721,7 +1737,7 @@ void bl_do_send_message_text (long long msg_id, int from_id, int to_type, int to
   out_int (to_id);
   out_int (date);
   out_cstring (s, l);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_create_message_text_fwd (int msg_id, int from_id, int to_type, int to_id, int date, int fwd, int fwd_date, int l, const char *s) {
@@ -1735,7 +1751,7 @@ void bl_do_create_message_text_fwd (int msg_id, int from_id, int to_type, int to
   out_int (fwd);
   out_int (fwd_date);
   out_cstring (s, l);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_create_message_media (int msg_id, int from_id, int to_type, int to_id, int date, int l, const char *s, const int *data, int len) {
@@ -1748,7 +1764,7 @@ void bl_do_create_message_media (int msg_id, int from_id, int to_type, int to_id
   out_int (date);
   out_cstring (s, l);
   out_ints (data, len);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_create_message_media_encr (long long msg_id, int from_id, int to_type, int to_id, int date, int l, const char *s, const int *data, int len, const int *data2, int len2) {
@@ -1762,7 +1778,7 @@ void bl_do_create_message_media_encr (long long msg_id, int from_id, int to_type
   out_cstring (s, l);
   out_ints (data, len);
   out_ints (data2, len2);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_create_message_media_fwd (int msg_id, int from_id, int to_type, int to_id, int date, int fwd, int fwd_date, int l, const char *s, const int *data, int len) {
@@ -1777,7 +1793,7 @@ void bl_do_create_message_media_fwd (int msg_id, int from_id, int to_type, int t
   out_int (fwd_date);
   out_cstring (s, l);
   out_ints (data, len);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_create_message_service (int msg_id, int from_id, int to_type, int to_id, int date, const int *data, int len) {
@@ -1789,7 +1805,7 @@ void bl_do_create_message_service (int msg_id, int from_id, int to_type, int to_
   out_int (to_id);
   out_int (date);
   out_ints (data, len);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 void bl_do_create_message_service_encr (long long msg_id, int from_id, int to_type, int to_id, int date, const int *data, int len) {
   clear_packet ();
@@ -1800,7 +1816,7 @@ void bl_do_create_message_service_encr (long long msg_id, int from_id, int to_ty
   out_int (to_id);
   out_int (date);
   out_ints (data, len);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_create_message_service_fwd (int msg_id, int from_id, int to_type, int to_id, int date, int fwd, int fwd_date, const int *data, int len) {
@@ -1814,7 +1830,7 @@ void bl_do_create_message_service_fwd (int msg_id, int from_id, int to_type, int
   out_int (fwd);
   out_int (fwd_date);
   out_ints (data, len);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_set_unread (struct message *M, int unread) {
@@ -1822,7 +1838,7 @@ void bl_do_set_unread (struct message *M, int unread) {
   clear_packet ();
   out_int (CODE_binlog_set_unread);
   out_int (M->id);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_set_message_sent (struct message *M) {
@@ -1830,7 +1846,7 @@ void bl_do_set_message_sent (struct message *M) {
   clear_packet ();
   out_int (CODE_binlog_set_message_sent);
   out_long (M->id);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_set_msg_id (struct message *M, int id) {
@@ -1839,12 +1855,12 @@ void bl_do_set_msg_id (struct message *M, int id) {
   out_int (CODE_binlog_set_msg_id);
   out_long (M->id);
   out_int (id);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }
 
 void bl_do_delete_msg (struct message *M) {
   clear_packet ();
   out_int (CODE_binlog_delete_msg);
   out_long (M->id);
-  add_log_event (packet_buffer, 4 * (packet_ptr - packet_buffer));
+  add_log_event (packet_buffer, 4 * (int)(packet_ptr - packet_buffer));
 }

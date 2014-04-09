@@ -147,4 +147,15 @@ void bl_do_set_unread (struct message *M, int unread);
 void bl_do_set_message_sent (struct message *M);
 void bl_do_set_msg_id (struct message *M, int id);
 void bl_do_delete_msg (struct message *M);
+
+#if defined(_WIN32) && !defined(BINLOG_IMPLEMENTATION)
+#define bl_do_set_user_full_photo(USER, START, LEN) bl_do_set_user_full_photo(USER, START, (int)(LEN))
+#define bl_do_set_chat_full_photo(U, START, LEN) bl_do_set_chat_full_photo(U, START, (int)(LEN))
+#define bl_do_create_message_service_fwd(msg_id, from_id, to_type, to_id, date, fwd, fwd_date, data, len) bl_do_create_message_service_fwd(msg_id, from_id, to_type, to_id, date, fwd, fwd_date, data, (int)(len)) 
+#define bl_do_create_message_service(msg_id, from_id, to_type, to_id, date, data, len) bl_do_create_message_service(msg_id, from_id, to_type, to_id, date, data, (int)(len))
+#define bl_do_create_message_media_fwd(msg_id, from_id, to_type, to_id, date, fwd, fwd_date, l, s, data, len) bl_do_create_message_media_fwd(msg_id, from_id, to_type, to_id, date, fwd, fwd_date, l, s, data, (int)(len))
+#define bl_do_create_message_media(msg_id, from_id, to_type, to_id, date, l, s, data, len) bl_do_create_message_media(msg_id, from_id, to_type, to_id, date, l, s, data, (int)(len))
+#define bl_do_create_message_media_encr(msg_id, from_id, to_type, to_id, date, l, s, data, len, data2, len2) bl_do_create_message_media_encr(msg_id, from_id, to_type, to_id, date, l, s, data, (int)(len), data2, (int)(len2))
+#define bl_do_create_message_service_encr(msg_id, from_id, to_type, to_id, date, data, len) bl_do_create_message_service_encr(msg_id, from_id, to_type, to_id, date, data, (int)(len))
+#endif
 #endif

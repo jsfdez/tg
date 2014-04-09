@@ -30,6 +30,8 @@
 #include <openssl/err.h>
 #include <zlib.h>
 
+#include "wincompat.h"
+
 #include "interface.h"
 #include "tools.h"
 
@@ -75,7 +77,15 @@ int tasprintf (char **res, const char *format, ...) {
 }
 
 void print_backtrace (void);
+
+#ifdef _WIN32
+#undef tfree
+#endif
+
 void tfree (void *ptr, int size __attribute__ ((unused))) {
+#ifdef _WIN32
+	_CRT_UNUSED (size);
+#endif
 #ifdef DEBUG
   total_allocated_bytes -= size;
   ptr -= RES_PRE;
@@ -107,7 +117,7 @@ void tfree (void *ptr, int size __attribute__ ((unused))) {
 
 void tfree_str (void *ptr) {
   if (!ptr) { return; }
-  tfree (ptr, strlen (ptr) + 1);
+  tfree (ptr, (int)strlen (ptr) + 1);
 }
 
 void tfree_secure (void *ptr, int size) {
@@ -116,6 +126,9 @@ void tfree_secure (void *ptr, int size) {
 }
 
 void *trealloc (void *ptr, size_t old_size __attribute__ ((unused)), size_t size) {
+#ifdef _WIN32
+	_CRT_UNUSED (old_size);
+#endif
 #ifdef DEBUG
   void *p = talloc (size);
   memcpy (p, ptr, size >= old_size ? old_size : size); 

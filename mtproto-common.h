@@ -128,6 +128,9 @@ static inline void out_int (int x) {
   *packet_ptr++ = x;
 }
 
+#ifdef _WIN32
+#define out_int(X) out_int((int)(X))
+#endif
 
 static inline void out_long (long long x) {
   assert (packet_ptr + 2 <= packet_buffer + PACKET_BUFFER_SIZE);
@@ -144,11 +147,11 @@ void out_cstring_careful (const char *str, long len);
 void out_data (const void *data, long len);
 
 static inline void out_string (const char *str) {
-  out_cstring (str, strlen (str));
+  out_cstring (str, (long)strlen (str));
 }
 
 static inline void out_bignum (BIGNUM *n) {
-  int l = serialize_bignum (n, (char *)packet_ptr, (PACKET_BUFFER_SIZE - (packet_ptr - packet_buffer)) * 4);
+  int l = serialize_bignum (n, (char *)packet_ptr, (int)(PACKET_BUFFER_SIZE - (packet_ptr - packet_buffer)) * 4);
   assert (l > 0);
   packet_ptr += l >> 2;
 }
@@ -265,7 +268,7 @@ static inline void fetch_skip_str (void) {
 }
 
 static inline long have_prefetch_ints (void) {
-  return in_end - in_ptr;
+  return (long)(in_end - in_ptr);
 }
 
 int fetch_bignum (BIGNUM *x);
