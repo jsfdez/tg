@@ -19,6 +19,10 @@
 #ifndef __STRUCTURES_H__
 #define __STRUCTURES_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <assert.h>
 typedef struct { int type; int id; } peer_id_t;
 
@@ -407,5 +411,8 @@ static inline peer_id_t set_peer_id (int type, int id) {
 static inline int cmp_peer_id (peer_id_t a, peer_id_t b) {
   return memcmp (&a, &b, sizeof (a));
 }
+#ifdef __cplusplus
+}
+#endif
 
 #endif

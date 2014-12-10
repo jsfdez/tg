@@ -23,6 +23,10 @@
 
 #define QUERY_ACK_RECEIVED 1
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct query;
 struct query_methods {
   int (*on_answer)(struct query *q);
@@ -120,4 +124,8 @@ void do_restore_msg (long long id);
 
 int get_dh_config_on_answer (struct query *q);
 void fetch_dc_option (void);
+
+#ifdef __cplusplus
+}
+#endif
 #endif

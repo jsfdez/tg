@@ -218,7 +218,6 @@ struct rpc_simple_ack {
 
 #pragma pack(pop)
 
-BN_CTX *BN_ctx;
 
 void prng_seed (const char *password_filename, int password_length);
 int serialize_bignum (BIGNUM *b, char *buffer, int maxlen);

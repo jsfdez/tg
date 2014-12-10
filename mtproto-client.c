@@ -83,6 +83,8 @@ int rpc_execute (struct connection *c, int op, int len);
 int rpc_becomes_ready (struct connection *c);
 int rpc_close (struct connection *c);
 
+BN_CTX *BN_ctx;
+
 struct connection_methods auth_methods = {
   .execute = rpc_execute,
   .ready = rpc_becomes_ready,

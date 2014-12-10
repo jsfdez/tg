@@ -1,6 +1,10 @@
 #ifndef LIBTG_H
 #define LIBTG_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "tools.h"
 #include "queries.h"
 
@@ -31,5 +35,9 @@ struct libcfg {
 extern struct dc *DC_working;
 
 void initialize_lib_tg (struct libcfg* config);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // LIBTG_H

@@ -20,6 +20,10 @@
 #ifndef __TOOLS_H__
 #define __TOOLS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void *talloc (size_t size);
 void *trealloc (void *ptr, size_t old_size, size_t size);
 void *talloc0 (size_t size);
@@ -41,4 +45,9 @@ int tasprintf (char **res, const char *format, ...) __attribute__ ((format (prin
 void tcheck (void);
 void texists (void *ptr, int size);
 #endif
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif
