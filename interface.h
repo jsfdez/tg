@@ -20,6 +20,23 @@
 #define __INTERFACE_H__
 #include "structures.h"
 
+#ifdef _WIN32
+typedef void* HANDLE;
+extern int color_normal;
+extern HANDLE console_handle;
+#define COLOR_RED FOREGROUND_RED
+#define COLOR_REDB FOREGROUND_RED + FOREGROUND_INTENSITY
+#define COLOR_NORMAL color_normal
+#define COLOR_GREEN FOREGROUND_GREEN
+#define COLOR_GREY 8
+#define COLOR_YELLOW FOREGROUND_RED + FOREGROUND_GREEN
+#define COLOR_BLUE FOREGROUND_BLUE
+#define COLOR_MAGENTA 14
+#define COLOR_CYAN 11
+#define COLOR_LCYAN 11
+
+#define COLOR_INVERSE 22
+#else
 #define COLOR_RED "\033[0;31m"
 #define COLOR_REDB "\033[1;31m"
 #define COLOR_NORMAL "\033[0m"
@@ -32,6 +49,7 @@
 #define COLOR_LCYAN "\033[0;36m"
 
 #define COLOR_INVERSE "\033[7m"
+#endif
 
 char *get_default_prompt (void);
 char *complete_none (const char *text, int state);
@@ -51,7 +69,11 @@ void print_encr_chat_name_full (peer_id_t id, peer_t *C);
 void print_encr_chat_name (peer_id_t id, peer_t *C);
 //void print_media (struct message_media *M);
 void pop_color (void);
+#ifdef _WIN32
+void push_color(int color);
+#else
 void push_color (const char *color);
+#endif
 void print_start (void);
 void print_end (void);
 void print_date_full (long t);

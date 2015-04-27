@@ -220,10 +220,21 @@ char *get_default_prompt (void) {
   if (in_chat_mode) {
     peer_t *U = user_chat_get (chat_mode_id);
     assert (U && U->print_name);
+#ifdef _WIN32
+	SetConsoleTextAttribute(console_handle, COLOR_RED);
+	l += tsnprintf(buf + l, 999 - l, "%.*s ", 100, U->print_name);
+	SetConsoleTextAttribute(console_handle, COLOR_NORMAL);
+#else
     l += tsnprintf (buf + l, 999 - l, COLOR_RED "%.*s " COLOR_NORMAL, 100, U->print_name);
+#endif
   }
   if (unread_messages || cur_uploading_bytes || cur_downloading_bytes) {
+#ifdef _WIN32
+	  SetConsoleTextAttribute(console_handle, COLOR_RED);
+	  l += tsnprintf (buf + l, 999 - l, "[");
+#else
     l += tsnprintf (buf + l, 999 - l, COLOR_RED "[");
+#endif
     int ok = 0;
     if (unread_messages) {
       l += tsnprintf (buf + l, 999 - l, "%d unread", unread_messages);
@@ -239,7 +250,12 @@ char *get_default_prompt (void) {
       ok = 1;
       l += tsnprintf (buf + l, 999 - l, "%lld%%Down", 100 * cur_downloaded_bytes / cur_downloading_bytes);
     }
-    l += tsnprintf (buf + l, 999 - l, "]" COLOR_NORMAL);
+#ifdef _WIN32
+	SetConsoleTextAttribute(console_handle, COLOR_NORMAL);
+	l += tsnprintf(buf + l, 999 - l, "]");
+#else
+	l += tsnprintf(buf + l, 999 - l, "]" COLOR_NORMAL);
+#endif
     return buf;
   } 
   l += tsnprintf (buf + l, 999 - l, "%s", default_prompt);
@@ -1202,33 +1218,61 @@ void logprintf (const char *format, ...) {
     x = 1;
     print_start ();
   }
+#ifdef _WIN32
+  SetConsoleTextAttribute(console_handle, COLOR_GREY);
+  printf (" *** ");
+#else
   printf (COLOR_GREY " *** ");
+#endif
   va_list ap;
   va_start (ap, format);
   vfprintf (stdout, format, ap);
   va_end (ap);
-  printf (COLOR_NORMAL);
+#ifdef _WIN32
+  SetConsoleTextAttribute(console_handle, COLOR_NORMAL);
+#else
+  printf(COLOR_NORMAL);
+#endif
   if (x) {
     print_end ();
   }
 }
 
 int color_stack_pos;
+#ifdef _WIN32
+int color_stack[10];
+#else
 const char *color_stack[10];
+#endif
 
-void push_color (const char *color) {
-  assert (color_stack_pos < 10);
+#ifdef _WIN32
+void push_color(int color) {
+	SetConsoleTextAttribute(console_handle, color);
+#else
+void push_color(const char *color) {
+#endif
+	assert(color_stack_pos < 10);
   color_stack[color_stack_pos ++] = color;
-  printf ("%s", color);
+#ifndef _WIN32
+  printf("%s", color);
+#endif
 }
 
 void pop_color (void) {
   assert (color_stack_pos > 0);
   color_stack_pos --;
   if (color_stack_pos >= 1) {
+#ifdef _WIN32
+	SetConsoleTextAttribute(console_handle, color_stack[color_stack_pos - 1]);
+#else
     printf ("%s", color_stack[color_stack_pos - 1]);
+#endif
   } else {
+#ifdef _WIN32
+	SetConsoleTextAttribute(console_handle, COLOR_NORMAL);
+#else
     printf ("%s", COLOR_NORMAL);
+#endif
   }
 }
 
@@ -1275,9 +1319,10 @@ void print_media (struct message_media *M) {
       return;
     case CODE_message_media_contact:
       printf ("[contact] ");
+	  SetConsoleTextAttribute(console_handle, COLOR_RED);
       push_color (COLOR_RED);
       printf ("%s %s ", M->first_name, M->last_name);
-      pop_color ();
+	  pop_color();
       printf ("%s", M->phone);
       return;
     case CODE_message_media_unsupported:
@@ -1293,7 +1338,7 @@ int unknown_user_list[1000];
 
 void print_user_name (peer_id_t id, peer_t *U) {
   assert (get_peer_type (id) == PEER_USER);
-  push_color (COLOR_RED);
+  push_color(COLOR_RED);
   if (!U) {
     printf ("user#%d", get_peer_id (id));
     int i;
@@ -1310,7 +1355,7 @@ void print_user_name (peer_id_t id, peer_t *U) {
     }
   } else {
     if (U->flags & (FLAG_USER_SELF | FLAG_USER_CONTACT)) {
-      push_color (COLOR_REDB);
+	  push_color(COLOR_REDB);
     }
     if ((U->flags & FLAG_DELETED)) {
       printf ("deleted user#%d", get_peer_id (id));
@@ -1332,35 +1377,35 @@ void print_user_name (peer_id_t id, peer_t *U) {
 
 void print_chat_name (peer_id_t id, peer_t *C) {
   assert (get_peer_type (id) == PEER_CHAT);
-  push_color (COLOR_MAGENTA);
+  push_color(COLOR_MAGENTA);
   if (!C) {
     printf ("chat#%d", get_peer_id (id));
   } else {
     printf ("%s", C->chat.title);
   }
-  pop_color ();
+  pop_color();
 }
 
 void print_encr_chat_name (peer_id_t id, peer_t *C) {
   assert (get_peer_type (id) == PEER_ENCR_CHAT);
-  push_color (COLOR_MAGENTA);
+  push_color(COLOR_MAGENTA);
   if (!C) {
     printf ("encr_chat#%d", get_peer_id (id));
   } else {
     printf ("%s", C->print_name);
   }
-  pop_color ();
+  pop_color();
 }
 
 void print_encr_chat_name_full (peer_id_t id, peer_t *C) {
   assert (get_peer_type (id) == PEER_ENCR_CHAT);
-  push_color (COLOR_MAGENTA);
+  push_color(COLOR_MAGENTA);
   if (!C) {
     printf ("encr_chat#%d", get_peer_id (id));
   } else {
     printf ("%s", C->print_name);
   }
-  pop_color ();
+  pop_color();
 }
 
 static char *monthes[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
@@ -1383,14 +1428,14 @@ int our_id;
 void print_service_message (struct message *M) {
   assert (M);
   print_start ();
-  push_color (COLOR_GREY);
+  push_color(COLOR_GREY);
   
-  push_color (COLOR_MAGENTA);
+  push_color(COLOR_MAGENTA);
   if (msg_num_mode) {
     printf ("%lld ", M->id);
   }
   print_date (M->date);
-  pop_color ();
+  pop_color();
   printf (" ");
   if (get_peer_type (M->to_id) == PEER_CHAT) {
     print_chat_name (M->to_id, user_chat_get (M->to_id));
@@ -1468,15 +1513,15 @@ void print_message (struct message *M) {
   print_start ();
   if (get_peer_type (M->to_id) == PEER_USER) {
     if (M->out) {
-      push_color (COLOR_GREEN);
+	  push_color(COLOR_GREEN);
       if (msg_num_mode) {
         printf ("%lld ", M->id);
       }
       print_date (M->date);
-      pop_color ();
+	  pop_color();
       printf (" ");
       print_user_name (M->to_id, user_chat_get (M->to_id));
-      push_color (COLOR_GREEN);
+	  push_color(COLOR_GREEN);
       if (M->unread) {
         printf (" <<< ");
       } else {

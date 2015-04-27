@@ -516,6 +516,9 @@ void sig_abrt_handler (int signum __attribute__ ((unused))) {
   exit (EXIT_FAILURE);
 }
 
+int color_normal;
+HANDLE console_handle;
+
 int main (int argc, char **argv) {
   signal (SIGSEGV, sig_segv_handler);
   signal (SIGABRT, sig_abrt_handler);
@@ -535,6 +538,11 @@ int main (int argc, char **argv) {
 
 #ifndef _WIN32
   get_terminal_attributes ();
+#else
+  console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  GetConsoleScreenBufferInfo(console_handle, &info);
+  color_normal = info.wAttributes;
 #endif
 
   #ifdef USE_LUA
