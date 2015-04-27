@@ -1,0 +1,2 @@
+#TargetFrameworkVersion=v4.0:PlatformToolSet=v120:EnableManagedIncrementalBuild=false:VCToolArchitecture=Native32Bit
+DLL ASM Debug|Win32|C:\work\tg\3rdParty\zlib-1.2.4\projects\visualc6\|
